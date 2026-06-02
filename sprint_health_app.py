@@ -332,7 +332,7 @@ class DevOpsApp(ctk.CTk):
 
         config = load_config()
         self.url_entry = self._create_input("Server URL", config.get("url", ""))
-        self.area_entry = self._create_input("Area Path", config.get("area", r"REDACTED_PROJECT\REDACTED_TEAM"))
+        self.area_entry = self._create_input("Area Path", config.get("area", r""))
         self.sprint_entry = self._create_input("Sprint", config.get("sprint", "@CurrentIteration"))
         self.token_entry = self._create_input("PAT Token", config.get("token", ""), is_password=True)
 
