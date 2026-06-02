@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+
+# Generated output (graphs, logs, debug)
+sprint_health_*.png
+log_*.txt
+debug_task_*.json
+
+# Config with sensitive data (PAT token)
+devops_config.json
+
+# Cache
+members_cache.json
