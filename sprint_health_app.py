@@ -1,15 +1,16 @@
-import customtkinter as ctk
-import requests
 import base64
-import matplotlib.pyplot as plt
-from tkinter import messagebox
-from datetime import datetime
-from collections import defaultdict
-import urllib3
-import sys
 import json
 import os
+import sys
 import threading
+from collections import defaultdict
+from datetime import datetime
+from tkinter import messagebox
+
+import customtkinter as ctk
+import matplotlib.pyplot as plt
+import requests
+import urllib3
 
 # Disable SSL Warnings
 urllib3.disable_warnings()
@@ -68,7 +69,7 @@ def get_sprint_dates(base_url, pat, area_path, sprint_name):
     print(f"Fetching dates for sprint: {sprint_name}...")
     b64_pat = base64.b64encode(f":{pat}".encode('utf-8')).decode('utf-8')
     headers = {'Authorization': f'Basic {b64_pat}'}
-    
+
     # Handle macros like @CurrentIteration
     if sprint_name.startswith('@'):
         team_name = area_path.split('\\')[-1]
@@ -93,7 +94,7 @@ def get_sprint_dates(base_url, pat, area_path, sprint_name):
     try:
         response = requests.get(url, headers=headers, verify=False)
         if response.status_code != 200: return None, None
-        
+
         def find_node(node, target):
             clean_target = target.split("'")[-2] if "'" in target else target
             if clean_target.lower() in node.get('path', '').lower() or clean_target.lower() == node.get('name', '').lower():
@@ -124,11 +125,11 @@ def get_tasks(base_url, pat, area_path, sprint, filter_members=None, progress_ca
         member_condition = f"AND [System.AssignedTo] IN ({names_str})"
 
     wiql_query = {"query": f"SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = 'Task' AND [System.AreaPath] UNDER '{area_path}' AND [System.IterationPath] = {iteration_condition} {member_condition}"}
-    
+
     print(f"WIQL Query: {wiql_query['query']}")
     response = requests.post(wiql_url, headers=headers, json=wiql_query, verify=False)
     if response.status_code != 200: raise Exception(f"API Error: {response.text}")
-    
+
     task_ids = [str(item['id']) for item in response.json().get('workItems', [])]
     print(f"Found {len(task_ids)} tasks: {task_ids}")
     if progress_callback: progress_callback(0.1)
@@ -137,10 +138,10 @@ def get_tasks(base_url, pat, area_path, sprint, filter_members=None, progress_ca
 def get_members_from_tasks(base_url, headers, area_path, sprint):
     iteration_condition = f"'{sprint}'" if not sprint.startswith('@') else sprint
     wiql_query = {"query": f"SELECT [System.Id] FROM WorkItems WHERE [System.WorkItemType] = 'Task' AND [System.AreaPath] UNDER '{area_path}' AND [System.IterationPath] = {iteration_condition}"}
-    
+
     response = requests.post(f"{base_url}/_apis/wit/wiql?api-version=6.0", headers=headers, json=wiql_query, verify=False)
     if response.status_code != 200: return []
-    
+
     task_ids = [str(item['id']) for item in response.json().get('workItems', [])]
     members = set()
     for i in range(0, len(task_ids), 200):
@@ -157,21 +158,21 @@ def get_work_history(task_ids, base_url, headers, start_date=None, end_date=None
     person_daily_data = defaultdict(lambda: defaultdict(lambda: {'completed': 0.0, 'remaining_dec': 0.0}))
     worker_text_logs = defaultdict(list)
     total = len(task_ids)
-    
+
     try:
         s_dt = datetime.strptime(start_date, "%d/%m/%Y").date() if start_date else None
         e_dt = datetime.strptime(end_date, "%d/%m/%Y").date() if end_date else None
     except:
         print("Warning: Date parsing failed. Use DD/MM/YYYY.")
         s_dt, e_dt = None, None
-    
+
     print(f"Calculating work for {total} tasks in period {start_date} to {end_date}...")
-    
+
     for idx, task_id in enumerate(task_ids):
         if progress_callback: progress_callback(0.1 + (idx / total) * 0.85)
-        
+
         if idx % 10 == 0: print(f"Processing {idx}/{total}...")
-        
+
         # Paginate through ALL updates — the API returns max 200 per call
         updates = []
         skip = 0
@@ -189,37 +190,37 @@ def get_work_history(task_ids, base_url, headers, start_date=None, end_date=None
             if len(page) < page_size:
                 break  # Last page
             skip += page_size
-        
+
         if not updates:
             continue
-        
+
         if len(updates) > page_size:
             print(f"  Task {task_id}: Fetched {len(updates)} updates (paginated)")
-        
+
         # Track assignee as it evolves through each update (chronological order)
         # so each field change is attributed to the person assigned at that point in time
         running_assignee = "Unassigned"
         task_changes = []
         for up in updates:
             f = up.get('fields', {})
-            
+
             # Update assignee tracking BEFORE processing field changes
             # so the assignee is correct for changes made in this same update
             if 'System.AssignedTo' in f:
                 val = f['System.AssignedTo'].get('newValue')
                 if val:
                     running_assignee = (val.get('displayName') if isinstance(val, dict) else val) or running_assignee
-            
+
             if COMPLETED_WORK_FIELD in f or REMAINING_WORK_FIELD in f:
                 d_str = f.get('System.ChangedDate', {}).get('newValue') or f.get('System.AuthorizedDate', {}).get('newValue')
                 if d_str:
                     dt = datetime.fromisoformat(d_str.replace('Z', '+00:00'))
                     local_dt = dt.astimezone()
                     date_k = local_dt.date()
-                    
+
                     if s_dt and date_k < s_dt: continue
                     if e_dt and date_k > e_dt: continue
-                    
+
                     change = {'datetime': local_dt, 'date': date_k, 'assignee': running_assignee}
                     if COMPLETED_WORK_FIELD in f:
                         change['comp_old'] = f[COMPLETED_WORK_FIELD].get('oldValue', 0) or 0
@@ -233,7 +234,7 @@ def get_work_history(task_ids, base_url, headers, start_date=None, end_date=None
             print(f"  Task {task_id}: No work field changes in date range.")
             continue
         task_changes.sort(key=lambda x: x['datetime'])
-        
+
         for ch in task_changes:
             date_k = ch['date']
             assignee = ch['assignee']
@@ -274,18 +275,18 @@ def get_work_history(task_ids, base_url, headers, start_date=None, end_date=None
 def plot_graphs_per_person(data):
     plt.close('all')
     if not data: return print("No data to plot.")
-    
+
     for person, daily in data.items():
         dates = sorted(daily.keys())
         labels = [d.strftime('%d/%m') for d in dates]
         comp = [daily[d]['completed'] for d in dates]
         rem = [daily[d]['remaining_dec'] for d in dates]
-        
+
         fig, ax = plt.subplots(figsize=(12, 6))
         x = range(len(dates))
         rects1 = ax.bar([i-0.2 for i in x], comp, 0.4, label='Comp. Added', color='#2ecc71')
         rects2 = ax.bar([i+0.2 for i in x], rem, 0.4, label='Rem. Decr.', color='#3498db')
-        
+
         def autolabel(rects):
             for rect in rects:
                 height = rect.get_height()
@@ -306,7 +307,7 @@ def plot_graphs_per_person(data):
         ax.legend()
         plt.tight_layout()
         plt.grid(True, alpha=0.3)
-        
+
         safe_name = "".join(c for c in person if c.isalnum() or c in (' ', '_')).replace(' ', '_').lower()
         plt.savefig(f"sprint_health_{safe_name}.png")
         print(f"Saved graph: sprint_health_{safe_name}.png")
@@ -319,18 +320,18 @@ class DevOpsApp(ctk.CTk):
         super().__init__()
         self.title("DevOps Sprint Health Pro")
         self.geometry("1000x900")
-        
+
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
         # Left Sidebar for inputs
         self.sidebar = ctk.CTkFrame(self, width=350, corner_radius=0)
         self.sidebar.grid(row=0, column=0, rowspan=2, sticky="nsew", padx=0, pady=0)
-        
+
         ctk.CTkLabel(self.sidebar, text="CONFIGURATION", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=20)
-        
+
         config = load_config()
-        self.url_entry = self._create_input("Server URL", config.get("url", "https://devops.example.invalid/REDACTED"))
+        self.url_entry = self._create_input("Server URL", config.get("url", ""))
         self.area_entry = self._create_input("Area Path", config.get("area", r"REDACTED_PROJECT\REDACTED_TEAM"))
         self.sprint_entry = self._create_input("Sprint", config.get("sprint", "@CurrentIteration"))
         self.token_entry = self._create_input("PAT Token", config.get("token", ""), is_password=True)
@@ -338,10 +339,10 @@ class DevOpsApp(ctk.CTk):
         # Date Filter Area
         date_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
         date_frame.pack(padx=20, fill="x", pady=10)
-        
+
         self.start_date_entry = self._create_input_in_frame(date_frame, "Start Date (DD/MM/YYYY)", config.get("start_date", ""))
         self.end_date_entry = self._create_input_in_frame(date_frame, "End Date (DD/MM/YYYY)", config.get("end_date", ""))
-        
+
         self.load_dates_btn = ctk.CTkButton(self.sidebar, text="📅 Load Sprint Dates", command=self.load_sprint_dates, fg_color="#444", hover_color="#555")
         self.load_dates_btn.pack(pady=5, padx=20, fill="x")
 
@@ -360,14 +361,14 @@ class DevOpsApp(ctk.CTk):
 
         # Member Selection Area
         ctk.CTkLabel(self.content, text="TEAM MEMBERS SELECTION", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, sticky="w", pady=(0, 10))
-        
+
         self.select_all_var = ctk.BooleanVar(value=False)
         self.select_all_cb = ctk.CTkCheckBox(self.content, text="Select All", variable=self.select_all_var, command=self._toggle_all_members, font=ctk.CTkFont(size=13, weight="bold"))
         self.select_all_cb.grid(row=1, column=0, sticky="w", pady=(0, 5), padx=5)
 
         self.member_frame = ctk.CTkScrollableFrame(self.content, height=400, label_text="Select members to include...")
         self.member_frame.grid(row=2, column=0, sticky="nsew")
-        
+
         self.sync_btn = ctk.CTkButton(self.content, text="↻ SYNC TEAM FROM DEVOPS", command=self.sync_members, fg_color="#444", hover_color="#555")
         self.sync_btn.grid(row=3, column=0, sticky="ew", pady=10)
 
@@ -377,7 +378,7 @@ class DevOpsApp(ctk.CTk):
         self.log_text.grid(row=5, column=0, sticky="ew", pady=(5, 0))
 
         sys.stdout = RedirectText(self.log_text)
-        
+
         self.member_list = load_members_cache()
         self.selected_vars = {}
         self._populate_members()
@@ -413,7 +414,7 @@ class DevOpsApp(ctk.CTk):
     def load_sprint_dates(self):
         url, area, sprint, token = self.url_entry.get(), self.area_entry.get(), self.sprint_entry.get(), self.token_entry.get()
         if not token: return messagebox.showwarning("Error", "Enter PAT")
-        
+
         def do_load():
             s, e = get_sprint_dates(url, token, area, sprint)
             if s and e:
@@ -424,14 +425,14 @@ class DevOpsApp(ctk.CTk):
                 print(f"Loaded dates (BR): {s} to {e}")
             else:
                 print("Could not find dates for this sprint or macro.")
-        
+
         threading.Thread(target=do_load, daemon=True).start()
 
     def sync_members(self):
         url, area, sprint, token = self.url_entry.get(), self.area_entry.get(), self.sprint_entry.get(), self.token_entry.get()
         if not token: return messagebox.showwarning("Error", "Enter PAT")
         self.sync_btn.configure(state="disabled", text="Syncing...")
-        
+
         def do_sync():
             try:
                 _, headers = get_tasks(url, token, area, sprint)
@@ -443,21 +444,21 @@ class DevOpsApp(ctk.CTk):
                 self.after(0, lambda: messagebox.showerror("Error", str(e)))
             finally:
                 self.after(0, lambda: self.sync_btn.configure(state="normal", text="↻ SYNC TEAM FROM DEVOPS"))
-        
+
         threading.Thread(target=do_sync, daemon=True).start()
 
     def start_extraction_thread(self):
         selected = [m for m, v in self.selected_vars.items() if v.get()]
         url, area, sprint, token = self.url_entry.get(), self.area_entry.get(), self.sprint_entry.get(), self.token_entry.get()
         start_date, end_date = self.start_date_entry.get(), self.end_date_entry.get()
-        
+
         if not token: return messagebox.showwarning("Error", "Missing PAT Token")
-        
+
         save_config(url, area, sprint, token, start_date, end_date)
         self.gen_btn.configure(state="disabled", text="PROCESSING...")
         self.progress_bar.set(0)
         self.log_text.delete("1.0", "end")
-        
+
         threading.Thread(target=self.run_extraction, args=(url, area, sprint, token, selected, start_date, end_date), daemon=True).start()
 
     def update_progress(self, val):
