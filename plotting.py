@@ -1,4 +1,6 @@
 import math
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 
 
@@ -20,6 +22,9 @@ def plot_graphs_per_person(data):
     plt.close('all')
     if not data:
         return print("No data to plot.")
+
+    path_logs = "logs/img"
+    Path(path_logs).mkdir(parents=True, exist_ok=True)
 
     for person, daily in data.items():
         dates = sorted(daily.keys())
@@ -43,7 +48,7 @@ def plot_graphs_per_person(data):
         plt.grid(True, alpha=0.3)
 
         safe_name = "".join(c for c in person if c.isalnum() or c in (' ', '_')).replace(' ', '_').lower()
-        plt.savefig(f"sprint_health_{safe_name}.png")
+        plt.savefig(f"{path_logs}/sprint_health_{safe_name}.png")
         print(f"Saved graph: sprint_health_{safe_name}.png")
         plt.close(fig)
 

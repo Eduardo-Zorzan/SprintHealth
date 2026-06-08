@@ -1,12 +1,12 @@
 import base64
+import concurrent.futures
 import time
 from collections import defaultdict
 from datetime import datetime
+from pathlib import Path
 
 import requests
 import urllib3
-
-import concurrent.futures
 
 from config import (
     COMPLETED_WORK_FIELD,
@@ -297,9 +297,13 @@ def get_work_history(task_ids, base_url, headers, start_date=None, end_date=None
 
     # Save worker text logs
     print("Saving worker text logs...")
+
+    path_logs = "logs/txt"
+    Path(path_logs).mkdir(parents=True, exist_ok=True)
+
     for person, logs in worker_text_logs.items():
         safe_name = "".join(c for c in person if c.isalnum() or c in (' ', '_')).replace(' ', '_').lower()
-        filename = f"log_{safe_name}.txt"
+        filename = f"{path_logs}/log_{safe_name}.txt"
         logs.sort()
         try:
             with open(filename, 'w', encoding='utf-8') as f:
