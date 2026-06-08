@@ -236,7 +236,7 @@ class DevOpsApp(ctk.CTk):
         # --- Tab 2: Reassignments ---
         self.tab_reassign = self.tabview.add("Reassignments")
         self.tab_reassign.grid_columnconfigure(0, weight=1)
-        self.tab_reassign.grid_rowconfigure(1, weight=1)
+        self.tab_reassign.grid_rowconfigure(2, weight=1)
 
         # Reassignment controls
         reassign_controls = ctk.CTkFrame(self.tab_reassign, fg_color="transparent")
@@ -252,7 +252,7 @@ class DevOpsApp(ctk.CTk):
         self.reassign_count_label.grid(row=0, column=1, sticky="w")
 
         # Reassignment table header
-        header_frame = ctk.CTkFrame(self.tab_reassign, fg_color="#2b2b2b", corner_radius=8, height=36)
+        header_frame = ctk.CTkFrame(self.tab_reassign, fg_color="#2b2b2b", corner_radius=8, height=10)
         header_frame.grid(row=1, column=0, sticky="new", padx=(0, 16), pady=(0, 0))
         header_frame.grid_propagate(False)
 
@@ -270,7 +270,6 @@ class DevOpsApp(ctk.CTk):
         # Reassignment table body (scrollable)
         self.reassign_table = ctk.CTkScrollableFrame(self.tab_reassign, label_text="")
         self.reassign_table.grid(row=2, column=0, sticky="nsew", pady=(0, 0))
-        self.tab_reassign.grid_rowconfigure(2, weight=1)
         self.reassign_table.grid_columnconfigure(0, weight=1)
 
         # --- Shared Log Window (below tabs) ---
