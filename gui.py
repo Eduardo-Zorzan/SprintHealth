@@ -14,13 +14,13 @@ from devops_api import (
     get_tasks,
     get_work_history,
 )
+from enums import Graphic_Type
 from plotting import generate_all_output
 from reassignment import get_reassignments
 
 # Set UI Theme
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
-
 
 class RedirectText:
     def __init__(self, text_widget):
@@ -220,8 +220,13 @@ class DevOpsApp(ctk.CTk):
         self.tab_sprint.grid_columnconfigure(0, weight=1)
         self.tab_sprint.grid_rowconfigure(2, weight=1)
 
+        # Graphic Type
+        ctk.CTkLabel(self.tab_sprint, text="GRAPHIC TYPE", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, sticky="w", pady=(0, 10))
+        self.graphic_type = ctk.CTkOptionMenu(self.tab_sprint, values=[Graphic_Type.TimesRegistering.name, Graphic_Type.Burndown.name])
+        self.graphic_type.set(Graphic_Type.TimesRegistering.name)
+
         # Member Selection Area
-        ctk.CTkLabel(self.tab_sprint, text="TEAM MEMBERS SELECTION", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, sticky="w", pady=(0, 10))
+        ctk.CTkLabel(self.tab_sprint, text="TEAM MEMBERS SELECTION", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, sticky="w", pady=(5, 20))
 
         self.select_all_var = ctk.BooleanVar(value=False)
         self.select_all_cb = ctk.CTkCheckBox(self.tab_sprint, text="Select All", variable=self.select_all_var, command=self._toggle_all_members, font=ctk.CTkFont(size=13, weight="bold"))
