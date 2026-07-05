@@ -11,3 +11,4 @@ debug_task_*.json
 devops_config.json
 members_cache.json
 iterations_cache.json
+.venv

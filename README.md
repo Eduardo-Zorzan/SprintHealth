@@ -33,6 +33,26 @@ DevOps Sprint Health Pro is a Python-based desktop application designed to provi
    python sprint_health_app.py
    ```
 
+## Running on macOS
+
+On macOS, avoid using Apple's bundled Command Line Tools Python (`/usr/bin/python3`) for this app. It can ship with an older Tk runtime, which may crash when `tkinter` or `customtkinter` creates the application window.
+
+Install Python and Tk with Homebrew, then run the project inside a virtual environment:
+
+```bash
+brew install python@3.12 python-tk@3.12
+
+/opt/homebrew/bin/python3.12 -m venv .venv
+source .venv/bin/activate
+
+python -m pip install --upgrade pip
+python -m pip install customtkinter Pillow matplotlib pandas requests
+
+python sprint_health_app.py
+```
+
+If `python` is not found on macOS, use `python3` or activate the virtual environment first.
+
 ## Configuration
 
 To use the application, you will need to provide:
