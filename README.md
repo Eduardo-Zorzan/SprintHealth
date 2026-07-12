@@ -64,7 +64,7 @@ To use the application, you will need to provide:
 ## Usage
 
 1. Launch the app and enter your configuration details on the left sidebar.
-2. Click **Load Sprint Dates** to automatically fetch the start and end dates for the selected sprint.
+2. Click **Load Combos** to populate the Area Path and Sprint lists. Click **Load Sprint Dates** to fetch dates for the selected sprint.
 3. In the **Sprint Health** tab, select the type of graphic you want to generate (e.g., TimesRegistering, Burndown) and select the team members you want to include.
 4. Click **GENERATE GRAPHICS**. The app will extract data from DevOps, process the history, and display the result in the built-in image viewer.
 5. In the **Reassignments** tab, click **LOAD REASSIGNMENTS** to track task delegation, handoffs, and assignments history within the sprint.

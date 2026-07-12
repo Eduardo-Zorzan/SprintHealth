@@ -1,6 +1,9 @@
 import math
 from pathlib import Path
 
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
@@ -110,6 +113,94 @@ def plot_all_graphs(data):
     print(f"Saved combined graph: {output_path}")
     plt.close(fig)
 
+    return output_path
+
+
+def _format_metric(value):
+    if isinstance(value, float):
+        return f"{value:,.2f}".rstrip('0').rstrip('.')
+    return str(value)
+
+
+def plot_burndown(burndown_data, output_path="sprint_burndown.png"):
+    """Save a dark-theme burndown chart PNG."""
+    plt.close('all')
+    if not burndown_data or not burndown_data.get('dates'):
+        print("No burndown data to plot.")
+        return None
+
+    dates = burndown_data['dates']
+    labels = [day.strftime('%d/%m/%Y') for day in dates]
+    x = list(range(len(dates)))
+    actual = burndown_data['actual_remaining']
+    capacity = burndown_data['remaining_capacity']
+    ideal = burndown_data['ideal_trend']
+    summary = burndown_data.get('summary', {})
+    x_actual = [idx for idx, value in enumerate(actual) if value is not None]
+    actual_values = [value for value in actual if value is not None]
+
+    fig, ax = plt.subplots(figsize=(18, 10))
+    fig.patch.set_facecolor('#111417')
+    ax.set_facecolor('#111417')
+
+    if actual_values:
+        ax.fill_between(x_actual, actual_values, color='#4db4ff', alpha=0.95, label='Remaining')
+        ax.plot(x_actual, actual_values, color='#4db4ff', linewidth=2)
+    else:
+        ax.plot([], [], color='#4db4ff', linewidth=2, label='Remaining')
+    ax.plot(x, capacity, color='#a8e063', linewidth=2, linestyle='--', label='Remaining Capacity')
+    ax.plot(x, ideal, color='#a8a18f', linewidth=2, label='Ideal Trend')
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=0, ha='center', color='#aaa')
+    ax.tick_params(axis='y', colors='#aaa')
+    ax.grid(True, axis='y', color='#33383d', alpha=0.6, linewidth=0.8)
+    ax.grid(False, axis='x')
+
+    for spine in ax.spines.values():
+        spine.set_color('#aaa')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    max_value = max(actual_values + capacity + ideal + [1])
+    ax.set_ylim(0, max_value * 1.15)
+    ax.set_xlim(-0.5, len(x) - 0.5)
+
+    start_label = summary.get('start_date', dates[0]).strftime('%d/%m/%Y')
+    end_label = summary.get('end_date', dates[-1]).strftime('%d/%m/%Y')
+    fig.text(0.03, 0.94, f"{start_label} - {end_label}", color='#b8b8b8', fontsize=13)
+
+    metric_color = '#e2e2e2'
+    label_color = '#b8b8b8'
+    fig.text(0.03, 0.85, "Completed", color=label_color, fontsize=13)
+    fig.text(0.09, 0.842, f"{_format_metric(summary.get('completed_percent', 0))}%",
+             color=metric_color, fontsize=24)
+
+    fig.text(0.30, 0.85, "Average\nburndown", color=label_color, fontsize=13, ha='center')
+    fig.text(0.36, 0.842, _format_metric(summary.get('average_burndown', 0)),
+             color=metric_color, fontsize=24)
+
+    fig.text(0.57, 0.85, "Items not\nestimated", color='#6bbcff', fontsize=13, ha='center')
+    fig.text(0.62, 0.842, _format_metric(summary.get('items_not_estimated', 0)),
+             color=metric_color, fontsize=24)
+
+    fig.text(0.92, 0.915, _format_metric(summary.get('remaining_work', 0)),
+             color=metric_color, fontsize=18, ha='right')
+    fig.text(0.92, 0.89, "Remaining Work, Remaining", color=label_color, fontsize=12, ha='right')
+    fig.text(0.92, 0.83, _format_metric(summary.get('total_scope_increase', 0)),
+             color=metric_color, fontsize=20, ha='right')
+    fig.text(0.84, 0.815, "Total Scope\nIncrease", color=label_color, fontsize=12, ha='right')
+
+    legend = ax.legend(loc='upper left', bbox_to_anchor=(0.0, -0.12), ncol=3,
+                       frameon=False, fontsize=12, handlelength=1.2, handletextpad=0.5)
+    for text in legend.get_texts():
+        text.set_color('#d0d0d0')
+
+    fig.subplots_adjust(left=0.06, right=0.96, top=0.76, bottom=0.18)
+
+    fig.savefig(output_path, dpi=200, facecolor=fig.get_facecolor())
+    print(f"Saved burndown graph: {output_path}")
+    plt.close(fig)
     return output_path
 
 
