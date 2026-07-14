@@ -88,8 +88,8 @@ class DevOpsApp(ctk.CTk):
 
         # Graphic Type
         ctk.CTkLabel(self.tab_sprint, text="GRAPHIC TYPE", font=ctk.CTkFont(size=16, weight="bold")).grid(row=0, column=0, sticky="w", pady=(0, 10))
-        self.graphic_type = ctk.CTkOptionMenu(self.tab_sprint, values=[Graphic_Type.TimesRegistering.name, Graphic_Type.Burndown.name])
-        self.graphic_type.set(Graphic_Type.TimesRegistering.name)
+        self.graphic_type = ctk.CTkOptionMenu(self.tab_sprint, values=[Graphic_Type.TimesRegistering.description, Graphic_Type.Burndown.description])
+        self.graphic_type.set(Graphic_Type.TimesRegistering.description)
         self.graphic_type.grid(row=1, column=0, sticky="ew", pady=(0, 15), padx=5)
 
         # Member Selection Area
@@ -329,7 +329,7 @@ class DevOpsApp(ctk.CTk):
 
     def run_extraction(self, url, area, sprint, token, selected, start_date, end_date, graphic_type):
         try:
-            selected_graphic = Graphic_Type[graphic_type]
+            selected_graphic = Graphic_Type.from_description(graphic_type)
             headers = build_auth_headers(token)
             if selected_graphic == Graphic_Type.Burndown:
                 burndown_data = get_historical_burndown_data(
