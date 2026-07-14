@@ -14,3 +14,6 @@ members_cache.json
 iterations_cache.json
 .venv
 .zed
+graphify-out
+logs
+.DS_Store

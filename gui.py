@@ -1,176 +1,34 @@
 import os
 import sys
 import threading
-import tkinter as tk
 from tkinter import messagebox
 
 import customtkinter as ctk
-from PIL import Image, ImageTk
 
+from charts.burndown import plot_burndown
+from charts.time_registration import generate_all_output
 from config import load_config, load_members_cache, save_config, save_members_cache
 from devops_api import (
+    build_auth_headers,
     get_area_options,
-    get_burndown_data,
+    get_historical_burndown_data,
+    get_historical_work_history,
     get_members_from_tasks,
     get_sprint_options,
     get_sprint_dates,
     get_tasks,
-    get_work_history,
     normalize_area_path,
     normalize_iteration_path,
 )
 from enums import Graphic_Type
-from plotting import generate_all_output, plot_burndown
 from reassignment import get_reassignments
+from ui.helpers import RedirectText, build_combo_values, build_sprint_combo_values
+from ui.reassignment_view import populate_reassignment_table
+from ui.viewers import BurndownViewerWindow, ImageViewerWindow
 
 # Set UI Theme
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
-
-class RedirectText:
-    def __init__(self, text_widget):
-        self.output = text_widget
-
-    def write(self, string):
-        self.output.insert("end", string)
-        self.output.see("end")
-
-    def flush(self):
-        pass
-
-
-class ImageViewerWindow(ctk.CTkToplevel):
-    """Full-featured image viewer with scroll-zoom and drag-pan."""
-
-    def __init__(self, master, image_path):
-        super().__init__(master)
-        self.title("Sprint Health — Combined Graph Viewer")
-        self.geometry("1200x800")
-        self.minsize(600, 400)
-
-        self.image_path = image_path
-        self.pil_image = Image.open(image_path)
-        self.zoom_level = 1.0
-        self.min_zoom = 0.1
-        self.max_zoom = 5.0
-
-        # Pan state
-        self._drag_start_x = 0
-        self._drag_start_y = 0
-
-        # --- Toolbar ---
-        toolbar = ctk.CTkFrame(self, height=40, corner_radius=0)
-        toolbar.pack(fill="x", padx=0, pady=0)
-
-        self.zoom_label = ctk.CTkLabel(toolbar, text="Zoom: 100%", font=ctk.CTkFont(size=13, weight="bold"))
-        self.zoom_label.pack(side="left", padx=15)
-
-        ctk.CTkButton(toolbar, text="Fit Window", width=100, command=self.fit_to_window,
-                       fg_color="#444", hover_color="#555").pack(side="left", padx=5)
-        ctk.CTkButton(toolbar, text="100%", width=60, command=self.zoom_100,
-                       fg_color="#444", hover_color="#555").pack(side="left", padx=5)
-        ctk.CTkButton(toolbar, text="Zoom +", width=70, command=lambda: self._zoom_step(1.25),
-                       fg_color="#444", hover_color="#555").pack(side="left", padx=5)
-        ctk.CTkButton(toolbar, text="Zoom −", width=70, command=lambda: self._zoom_step(0.8),
-                       fg_color="#444", hover_color="#555").pack(side="left", padx=5)
-
-        img_info = f"{self.pil_image.width}×{self.pil_image.height}px"
-        ctk.CTkLabel(toolbar, text=img_info, font=ctk.CTkFont(size=11),
-                      text_color="#888").pack(side="right", padx=15)
-
-        # --- Canvas ---
-        canvas_frame = ctk.CTkFrame(self, fg_color="transparent")
-        canvas_frame.pack(fill="both", expand=True)
-
-        self.canvas = tk.Canvas(canvas_frame, bg="#1a1a1a", highlightthickness=0)
-        self.canvas.pack(fill="both", expand=True)
-
-        # Scrollbars
-        self.h_scroll = tk.Scrollbar(canvas_frame, orient="horizontal", command=self.canvas.xview)
-        self.v_scroll = tk.Scrollbar(canvas_frame, orient="vertical", command=self.canvas.yview)
-        self.canvas.configure(xscrollcommand=self.h_scroll.set, yscrollcommand=self.v_scroll.set)
-
-        # Bind events
-        self.canvas.bind("<MouseWheel>", self._on_mousewheel)           # Windows scroll
-        self.canvas.bind("<Control-MouseWheel>", self._on_ctrl_scroll)  # Ctrl+scroll zoom
-        self.canvas.bind("<ButtonPress-1>", self._on_drag_start)
-        self.canvas.bind("<B1-Motion>", self._on_drag_motion)
-        self.canvas.bind("<Configure>", self._on_canvas_resize)
-
-        # Initial display
-        self._tk_image = None
-        self.after(100, self.fit_to_window)
-
-    def _render_image(self, fast=False):
-        """Render the image at the current zoom level."""
-        w = max(1, int(self.pil_image.width * self.zoom_level))
-        h = max(1, int(self.pil_image.height * self.zoom_level))
-
-        resample_method = Image.NEAREST if fast else Image.LANCZOS
-        resized = self.pil_image.resize((w, h), resample_method)
-        self._tk_image = ImageTk.PhotoImage(resized)
-
-        self.canvas.delete("all")
-        self.canvas.create_image(0, 0, anchor="nw", image=self._tk_image)
-        self.canvas.configure(scrollregion=(0, 0, w, h))
-
-        pct = int(self.zoom_level * 100)
-        self.zoom_label.configure(text=f"Zoom: {pct}%")
-
-    def fit_to_window(self):
-        """Fit the image to the current canvas size."""
-        self.canvas.update_idletasks()
-        cw = self.canvas.winfo_width()
-        ch = self.canvas.winfo_height()
-        if cw <= 1 or ch <= 1:
-            return
-
-        zoom_x = cw / self.pil_image.width
-        zoom_y = ch / self.pil_image.height
-        self.zoom_level = min(zoom_x, zoom_y)
-        self._render_image()
-
-    def zoom_100(self):
-        """Reset zoom to 100%."""
-        self.zoom_level = 1.0
-        self._render_image()
-
-    def _zoom_step(self, factor):
-        """Apply a zoom factor."""
-        new_zoom = self.zoom_level * factor
-        new_zoom = max(self.min_zoom, min(self.max_zoom, new_zoom))
-        self.zoom_level = new_zoom
-
-        if hasattr(self, '_fast_job') and self._fast_job:
-            self.after_cancel(self._fast_job)
-        self._fast_job = self.after(15, lambda: self._render_image(fast=True))
-
-        if hasattr(self, '_zoom_job') and self._zoom_job:
-            self.after_cancel(self._zoom_job)
-        self._zoom_job = self.after(400, lambda: self._render_image(fast=False))
-
-    def _on_mousewheel(self, event):
-        """Scroll vertically without Ctrl, zoom with Ctrl."""
-        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-    def _on_ctrl_scroll(self, event):
-        """Zoom in/out with Ctrl+Scroll."""
-        if event.delta > 0:
-            self._zoom_step(1.15)
-        else:
-            self._zoom_step(1 / 1.15)
-
-    def _on_drag_start(self, event):
-        """Start panning."""
-        self.canvas.scan_mark(event.x, event.y)
-
-    def _on_drag_motion(self, event):
-        """Pan while dragging."""
-        self.canvas.scan_dragto(event.x, event.y, gain=1)
-
-    def _on_canvas_resize(self, event):
-        """Re-render on canvas resize if in fit mode."""
-        pass  # User controls zoom manually
 
 
 class DevOpsApp(ctk.CTk):
@@ -241,7 +99,7 @@ class DevOpsApp(ctk.CTk):
         self.select_all_cb = ctk.CTkCheckBox(self.tab_sprint, text="Select All", variable=self.select_all_var, command=self._toggle_all_members, font=ctk.CTkFont(size=13, weight="bold"))
         self.select_all_cb.grid(row=3, column=0, sticky="w", pady=(0, 5), padx=5)
 
-        self.member_frame = ctk.CTkScrollableFrame(self.tab_sprint, height=400, label_text="Select members to include...")
+        self.member_frame = ctk.CTkScrollableFrame(self.tab_sprint, height=400)
         self.member_frame.grid(row=4, column=0, sticky="nsew")
 
         self.sync_btn = ctk.CTkButton(self.tab_sprint, text="↻ SYNC TEAM FROM DEVOPS", command=self.sync_members, fg_color="#444", hover_color="#555")
@@ -327,37 +185,10 @@ class DevOpsApp(ctk.CTk):
         return entry
 
     def _build_combo_values(self, options, selected=None):
-        values = []
-        seen = set()
-
-        def add(value):
-            text = (value or "").strip()
-            key = text.casefold()
-            if text and key not in seen:
-                seen.add(key)
-                values.append(text)
-
-        for option in options:
-            add(option)
-        add(selected)
-        return values or [""]
+        return build_combo_values(options, selected)
 
     def _build_sprint_combo_values(self, sprint_options, selected=None):
-        values = []
-        seen = set()
-
-        def add(value):
-            text = (value or "").strip()
-            key = text.casefold()
-            if text and key not in seen:
-                seen.add(key)
-                values.append(text)
-
-        add("@CurrentIteration")
-        for option in sprint_options:
-            add(option)
-        add(selected)
-        return values or ["@CurrentIteration"]
+        return build_sprint_combo_values(sprint_options, selected)
 
     def _set_area_combo_values(self, area_options, selected):
         selected = normalize_area_path(selected)
@@ -499,27 +330,31 @@ class DevOpsApp(ctk.CTk):
     def run_extraction(self, url, area, sprint, token, selected, start_date, end_date, graphic_type):
         try:
             selected_graphic = Graphic_Type[graphic_type]
-            ids, headers = get_tasks(url, token, area, sprint, filter_members=selected, progress_callback=self.update_progress)
-            if ids:
-                if selected_graphic == Graphic_Type.Burndown:
-                    data = get_burndown_data(
-                        ids, url, headers, area, sprint,
-                        selected_members=selected,
-                        start_date=start_date,
-                        end_date=end_date,
-                        progress_callback=self.update_progress,
-                    )
-                    combined_path = plot_burndown(data)
-                else:
-                    data = get_work_history(ids, url, headers, start_date=start_date, end_date=end_date, progress_callback=self.update_progress)
-                    combined_path = generate_all_output(data)
-
+            headers = build_auth_headers(token)
+            if selected_graphic == Graphic_Type.Burndown:
+                burndown_data = get_historical_burndown_data(
+                    url, headers, area, sprint,
+                    selected_members=selected,
+                    start_date=start_date,
+                    end_date=end_date,
+                    progress_callback=self.update_progress,
+                )
+                burndown_path = plot_burndown(burndown_data)
+                self.update_progress(1.0)
+                if burndown_path:
+                    self.after(0, lambda data=burndown_data, path=burndown_path: self._open_burndown_viewer(data, path))
+            else:
+                data = get_historical_work_history(
+                    url, headers, area, sprint,
+                    selected_members=selected,
+                    start_date=start_date,
+                    end_date=end_date,
+                    progress_callback=self.update_progress,
+                )
+                combined_path = generate_all_output(data)
                 self.update_progress(1.0)
                 if combined_path:
-                    self.after(0, lambda: self._open_image_viewer(combined_path))
-            else:
-                print("No tasks found.")
-                self.update_progress(1.0)
+                    self.after(0, lambda path=combined_path: self._open_image_viewer(path))
         except Exception as e:
             self.after(0, lambda err=e: messagebox.showerror("Error", str(err)))
         finally:
@@ -542,6 +377,23 @@ class DevOpsApp(ctk.CTk):
         self._image_viewer = ImageViewerWindow(self, abs_path)
         self._image_viewer.focus()
         print(f"Opened image viewer: {abs_path}")
+
+    def _open_burndown_viewer(self, burndown_data, image_path):
+        """Open the interactive burndown graph viewer."""
+        abs_path = os.path.abspath(image_path)
+        if not os.path.exists(abs_path):
+            print(f"Image not found: {abs_path}")
+            return
+
+        if self._image_viewer is not None:
+            try:
+                self._image_viewer.destroy()
+            except:
+                pass
+
+        self._image_viewer = BurndownViewerWindow(self, burndown_data, abs_path)
+        self._image_viewer.focus()
+        print(f"Opened interactive burndown viewer: {abs_path}")
 
     # ===================== Reassignment Tab =====================
 
@@ -577,33 +429,10 @@ class DevOpsApp(ctk.CTk):
 
     def _populate_reassignment_table(self, reassignments):
         """Populate the reassignment table with data."""
-        # Clear existing rows
-        for child in self.reassign_table.winfo_children():
-            child.destroy()
-
-        if not reassignments:
-            ctk.CTkLabel(self.reassign_table, text="No reassignments found in the selected period.",
-                          font=ctk.CTkFont(size=13), text_color="#888").grid(row=0, column=0, columnspan=5, pady=20)
-            self.reassign_count_label.configure(text="0 reassignments found")
-            return
-
-        self.reassign_count_label.configure(text=f"{len(reassignments)} reassignment(s) found")
-
-        # Alternating row colors for readability
-        row_colors = ["#1e1e1e", "#252525"]
-
-        for i, r in enumerate(reassignments):
-            bg_color = row_colors[i % 2]
-            row_frame = ctk.CTkFrame(self.reassign_table, fg_color=bg_color, corner_radius=4, height=36)
-            row_frame.grid(row=i, column=0, sticky="ew", padx=0, pady=1)
-            row_frame.grid_propagate(False)
-
-            values = [str(r['task_id']), r['from'], r['to'], r['date'], r['changed_by']]
-            colors = ["#aaa", "#e67e22", "#2ecc71", "#3498db", "#9b59b6"]
-
-            for col, (val, color) in enumerate(zip(values, colors)):
-                lbl = ctk.CTkLabel(row_frame, text=val, font=ctk.CTkFont(size=11),
-                                   text_color=color, anchor="center")
-                lbl.place(relx=self.rel_x[col], rely=0.5, relwidth=self.rel_w[col], anchor="w")
-
-        print(f"Displayed {len(reassignments)} reassignment(s) in table.")
+        populate_reassignment_table(
+            self.reassign_table,
+            self.reassign_count_label,
+            reassignments,
+            self.rel_x,
+            self.rel_w,
+        )

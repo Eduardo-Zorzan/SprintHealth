@@ -5,6 +5,7 @@ DevOps Sprint Health Pro is a Python-based desktop application designed to provi
 ## Features
 
 - **Sprint Health Graphics**: Generate detailed burndown and time-registration charts for the current or previous sprints.
+- **Historical Sprint Membership**: Burndown and time-registration charts use Azure DevOps Analytics snapshots when available, with WIQL `ASOF` fallback, so moved-out sprint tasks are still counted on the dates they belonged to the sprint.
 - **Team Member Selection**: Filter metrics by specific team members. Syncs dynamically with DevOps.
 - **Reassignments Tracking**: Analyze task reassignments over time to see who reassigned tasks, to whom, and when.
 - **Built-in Image Viewer**: Explore generated graphs directly inside the app with panning and zooming support.
@@ -61,6 +62,8 @@ To use the application, you will need to provide:
 - **Sprint**: The iteration path (defaults to `@CurrentIteration`).
 - **PAT Token**: A Personal Access Token (PAT) with read access to work items in Azure DevOps.
 
+For closest parity with Azure DevOps burndown analytics, the project should have Analytics/OData enabled. If Analytics is unavailable, the app falls back to historical WIQL queries.
+
 ## Usage
 
 1. Launch the app and enter your configuration details on the left sidebar.
@@ -72,9 +75,11 @@ To use the application, you will need to provide:
 ## Architecture
 
 - `sprint_health_app.py`: Main entry point for the application.
-- `gui.py`: Contains the `customtkinter` UI, threading operations, and application state logic.
+- `gui.py`: Main `customtkinter` application orchestration, threading operations, and application state logic.
+- `ui/`: Reusable UI helpers, image/burndown viewers, and reassignment table rendering.
+- `charts/`: Burndown and time-registration chart generation helpers.
 - `devops_api.py`: Handles all HTTP API interactions with Azure DevOps.
 - `config.py`: Manages saving and loading local configuration and member caches (e.g., `devops_config.json`, `members_cache.json`).
-- `plotting.py`: Generates the visual charts.
+- `plotting.py`: Compatibility facade for chart generation imports.
 - `reassignment.py`: Processes and analyzes task reassignment history.
 - `enums.py`: Contains enumerations like `Graphic_Type`.

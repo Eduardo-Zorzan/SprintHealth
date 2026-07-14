@@ -4,7 +4,7 @@ import time
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import requests
 import urllib3
@@ -89,6 +89,332 @@ def _date_range(start_date, end_date):
     while current <= end_date:
         yield current
         current += timedelta(days=1)
+
+
+class AnalyticsUnavailable(Exception):
+    """Raised when Azure DevOps Analytics OData cannot be used."""
+
+
+def build_auth_headers(pat):
+    b64_pat = base64.b64encode(f":{pat}".encode('utf-8')).decode('utf-8')
+    return {'Authorization': f'Basic {b64_pat}', 'Content-Type': 'application/json'}
+
+
+def _date_sk(day):
+    return int(day.strftime("%Y%m%d"))
+
+
+def _parse_date_sk(value):
+    text = str(value)
+    return datetime.strptime(text, "%Y%m%d").date()
+
+
+def _odata_quote(value):
+    return "'" + (value or "").replace("'", "''") + "'"
+
+
+def _analytics_root_url(base_url):
+    parsed = urlparse(base_url.rstrip('/'))
+    path_parts = [part for part in parsed.path.split('/') if part]
+
+    if parsed.netloc.casefold() == 'dev.azure.com':
+        if len(path_parts) < 2:
+            raise AnalyticsUnavailable("Analytics OData needs a project-scoped Azure DevOps URL.")
+        organization = path_parts[0]
+        project = path_parts[1]
+        return f"{parsed.scheme}://analytics.dev.azure.com/{organization}/{quote(project, safe='')}/_odata/v4.0-preview"
+
+    if parsed.netloc.casefold().endswith('.visualstudio.com') and path_parts:
+        organization = parsed.netloc.split('.')[0]
+        project = path_parts[-1]
+        return f"{parsed.scheme}://analytics.dev.azure.com/{organization}/{quote(project, safe='')}/_odata/v4.0-preview"
+
+    return f"{base_url.rstrip('/')}/_odata/v4.0-preview"
+
+
+def _ensure_work_item_snapshot_supported(session, analytics_root):
+    response = session.get(f"{analytics_root}/$metadata", verify=False)
+    if response.status_code != 200:
+        raise AnalyticsUnavailable(f"Analytics metadata returned {response.status_code}.")
+    if "WorkItemSnapshot" not in response.text:
+        raise AnalyticsUnavailable("Analytics metadata does not expose WorkItemSnapshot.")
+
+
+def _odata_get_all(session, url, params=None):
+    rows = []
+    next_url = url
+    next_params = params
+    while next_url:
+        response = session.get(next_url, params=next_params, verify=False)
+        if response.status_code != 200:
+            message = response.text[:500]
+            try:
+                payload = response.json()
+                message = (
+                    payload.get('error', {}).get('message') or
+                    payload.get('message') or
+                    message
+                )
+            except Exception:
+                pass
+            raise AnalyticsUnavailable(f"Analytics query returned {response.status_code}: {message}")
+        payload = response.json()
+        rows.extend(payload.get('value', []))
+        next_url = payload.get('@odata.nextLink')
+        next_params = None
+    return rows
+
+
+def _literal_iteration_path(base_url, headers, area_path, sprint, start_date=None, end_date=None):
+    clean_sprint = normalize_iteration_path(sprint)
+    if not clean_sprint.startswith('@'):
+        return clean_sprint
+
+    iteration = resolve_team_iteration(base_url, headers, area_path, clean_sprint, start_date, end_date)
+    return normalize_iteration_path(iteration.get('path') or iteration.get('name') or clean_sprint)
+
+
+def _work_days(start_date, end_date):
+    return [day for day in _date_range(start_date, end_date) if day.weekday() < 5]
+
+
+def _snapshot_assignee(row):
+    value = (
+        row.get('AssignedTo') or
+        row.get('AssignedToUserName') or
+        row.get('AssignedToDisplayName')
+    )
+    if isinstance(value, dict):
+        return value.get('UserName') or value.get('DisplayName') or value.get('displayName') or ""
+    return value or ""
+
+
+def _historical_filter(area_path, sprint_path, start_date, end_date):
+    area = normalize_area_path(area_path)
+    sprint = normalize_iteration_path(sprint_path)
+    area_prefix = area + "\\"
+    return (
+        f"DateSK ge {_date_sk(start_date)} and DateSK le {_date_sk(end_date)} "
+        f"and WorkItemType eq 'Task' "
+        f"and (Area/AreaPath eq {_odata_quote(area)} or startswith(Area/AreaPath,{_odata_quote(area_prefix)})) "
+        f"and Iteration/IterationPath eq {_odata_quote(sprint)}"
+    )
+
+
+def _query_historical_burndown_odata(base_url, headers, area_path, sprint,
+                                     start_date, end_date, progress_callback=None):
+    analytics_root = _analytics_root_url(base_url)
+    session = requests.Session()
+    session.verify = False
+    session.headers.update(headers)
+
+    if progress_callback:
+        progress_callback(0.12)
+    _ensure_work_item_snapshot_supported(session, analytics_root)
+
+    sprint_path = _literal_iteration_path(base_url, headers, area_path, sprint, start_date, end_date)
+    params = {
+        '$apply': (
+            f"filter({_historical_filter(area_path, sprint_path, start_date, end_date)})/"
+            "groupby((DateSK),aggregate(RemainingWork with sum as RemainingWork))"
+        )
+    }
+    print(f"Querying Analytics WorkItemSnapshot aggregate: {analytics_root}/WorkItemSnapshot")
+    rows = _odata_get_all(session, f"{analytics_root}/WorkItemSnapshot", params=params)
+    rows.sort(key=lambda row: row.get('DateSK') or 0)
+
+    if progress_callback:
+        progress_callback(0.35)
+    print(f"Loaded {len(rows)} aggregated WorkItemSnapshot burndown row(s).")
+    return rows
+
+
+def _query_historical_membership_odata(base_url, headers, area_path, sprint,
+                                      start_date, end_date, include_weekends=False,
+                                      progress_callback=None):
+    analytics_root = _analytics_root_url(base_url)
+    session = requests.Session()
+    session.verify = False
+    session.headers.update(headers)
+
+    if progress_callback:
+        progress_callback(0.12)
+    _ensure_work_item_snapshot_supported(session, analytics_root)
+
+    sprint_path = _literal_iteration_path(base_url, headers, area_path, sprint, start_date, end_date)
+    params = {
+        '$apply': (
+            f"filter({_historical_filter(area_path, sprint_path, start_date, end_date)})/"
+            "groupby((DateSK,WorkItemId),aggregate($count as SnapshotCount))"
+        )
+    }
+    print(f"Querying Analytics WorkItemSnapshot membership aggregate: {analytics_root}/WorkItemSnapshot")
+    rows = _odata_get_all(session, f"{analytics_root}/WorkItemSnapshot", params=params)
+    rows.sort(key=lambda row: ((row.get('DateSK') or 0), (row.get('WorkItemId') or 0)))
+
+    if not include_weekends:
+        work_days = {_date_sk(day) for day in _work_days(start_date, end_date)}
+        rows = [row for row in rows if row.get('DateSK') in work_days]
+
+    if progress_callback:
+        progress_callback(0.35)
+    print(f"Loaded {len(rows)} aggregated WorkItemSnapshot membership row(s).")
+    return rows
+
+
+def _asof_literal(day):
+    return day.strftime("%Y-%m-%dT23:59:59Z")
+
+
+def _query_task_ids_asof(base_url, headers, area_path, sprint_path, selected_members, day):
+    member_condition = ""
+    if selected_members:
+        names_str = ", ".join([_wiql_quote(name) for name in selected_members])
+        member_condition = f"AND [System.AssignedTo] IN ({names_str})"
+
+    wiql_query = {
+        "query": (
+            "SELECT [System.Id] FROM WorkItems "
+            "WHERE [System.WorkItemType] = 'Task' "
+            f"AND [System.AreaPath] UNDER {_wiql_quote(normalize_area_path(area_path))} "
+            f"AND [System.IterationPath] = {_wiql_quote(normalize_iteration_path(sprint_path))} "
+            f"{member_condition} ASOF '{_asof_literal(day)}'"
+        )
+    }
+    response = requests.post(
+        f"{base_url}/_apis/wit/wiql",
+        headers=headers,
+        params={'api-version': '6.0'},
+        json=wiql_query,
+        verify=False,
+    )
+    if response.status_code != 200:
+        raise Exception(f"Historical WIQL failed for {day}: {response.text}")
+    return [str(item['id']) for item in response.json().get('workItems', [])]
+
+
+def _fetch_work_items_asof(base_url, headers, task_ids, day):
+    fields = [
+        REMAINING_WORK_FIELD,
+        COMPLETED_WORK_FIELD,
+        'System.AssignedTo',
+        'System.State',
+    ]
+    rows = []
+    for i in range(0, len(task_ids), 200):
+        batch = task_ids[i:i + 200]
+        response = requests.get(
+            f"{base_url}/_apis/wit/workitems",
+            headers=headers,
+            params={
+                'ids': ",".join(batch),
+                'fields': ",".join(fields),
+                'asOf': _asof_literal(day),
+                'api-version': '6.0',
+            },
+            verify=False,
+        )
+        if response.status_code != 200:
+            raise Exception(f"Historical work item fetch failed for {day}: {response.text}")
+        rows.extend(response.json().get('value', []))
+    return rows
+
+
+def _query_historical_snapshots_wiql(base_url, headers, area_path, sprint, selected_members,
+                                    start_date, end_date, include_weekends=False,
+                                    progress_callback=None):
+    sprint_path = _literal_iteration_path(base_url, headers, area_path, sprint, start_date, end_date)
+    days = list(_date_range(start_date, end_date)) if include_weekends else _work_days(start_date, end_date)
+    rows = []
+    total_days = len(days) or 1
+
+    print("Falling back to WIQL ASOF historical membership.")
+    for index, day in enumerate(days, start=1):
+        if progress_callback:
+            progress_callback(0.12 + (index / total_days) * 0.23)
+        task_ids = _query_task_ids_asof(base_url, headers, area_path, sprint_path, selected_members, day)
+        if not task_ids:
+            continue
+        for item in _fetch_work_items_asof(base_url, headers, task_ids, day):
+            fields = item.get('fields', {})
+            assigned_to = fields.get('System.AssignedTo')
+            rows.append({
+                'WorkItemId': item.get('id'),
+                'DateSK': _date_sk(day),
+                'RemainingWork': fields.get(REMAINING_WORK_FIELD),
+                'CompletedWork': fields.get(COMPLETED_WORK_FIELD),
+                'State': fields.get('System.State', ''),
+                'AssignedTo': _identity_name(assigned_to),
+            })
+
+    print(f"Loaded {len(rows)} historical row(s) through WIQL ASOF.")
+    return rows
+
+
+def _get_historical_snapshot_rows(base_url, headers, area_path, sprint, selected_members,
+                                  start_date, end_date, include_weekends=False,
+                                  progress_callback=None):
+    if not selected_members:
+        try:
+            rows = _query_historical_membership_odata(
+                base_url, headers, area_path, sprint,
+                start_date, end_date, include_weekends=include_weekends,
+                progress_callback=progress_callback,
+            )
+            if rows:
+                return rows
+            print("Analytics WorkItemSnapshot membership aggregate returned no rows; trying WIQL ASOF fallback.")
+        except AnalyticsUnavailable as exc:
+            print(f"Analytics WorkItemSnapshot membership aggregate unavailable: {exc}")
+    else:
+        print("Member-filtered historical membership uses WIQL ASOF for assignee parity.")
+
+    return _query_historical_snapshots_wiql(
+        base_url, headers, area_path, sprint, selected_members,
+        start_date, end_date, include_weekends=include_weekends,
+        progress_callback=progress_callback,
+    )
+
+
+def _get_historical_burndown_rows(base_url, headers, area_path, sprint, selected_members,
+                                  start_date, end_date, progress_callback=None):
+    if not selected_members:
+        try:
+            rows = _query_historical_burndown_odata(
+                base_url, headers, area_path, sprint,
+                start_date, end_date, progress_callback=progress_callback,
+            )
+            if rows:
+                return rows
+            print("Analytics WorkItemSnapshot burndown aggregate returned no rows; trying WIQL ASOF fallback.")
+        except AnalyticsUnavailable as exc:
+            print(f"Analytics WorkItemSnapshot burndown aggregate unavailable: {exc}")
+    else:
+        print("Member-filtered burndown uses WIQL ASOF for assignee parity.")
+
+    return _query_historical_snapshots_wiql(
+        base_url, headers, area_path, sprint, selected_members,
+        start_date, end_date, include_weekends=False,
+        progress_callback=progress_callback,
+    )
+
+
+def _rows_by_date(rows):
+    grouped = defaultdict(list)
+    for row in rows:
+        if row.get('DateSK') is None:
+            continue
+        grouped[_parse_date_sk(row['DateSK'])].append(row)
+    return grouped
+
+
+def _membership_by_date(rows):
+    membership = defaultdict(set)
+    for row in rows:
+        if row.get('DateSK') is None or row.get('WorkItemId') is None:
+            continue
+        membership[_parse_date_sk(row['DateSK'])].add(str(row['WorkItemId']))
+    return membership
 
 
 def _fetch_task_updates(session, base_url, task_id):
@@ -572,6 +898,141 @@ def _is_day_off(day, days_off):
     return False
 
 
+def _build_capacity_series(capacities, dates):
+    daily_capacity = defaultdict(float)
+    capacity_members = []
+    for capacity in capacities:
+        identity = capacity.get('teamMember', {})
+        capacity_members.append(_identity_name(identity))
+        capacity_per_day = sum(_coerce_float(activity.get('capacityPerDay'), 0.0)
+                               for activity in capacity.get('activities', []))
+        for day in dates:
+            if not _is_day_off(day, capacity.get('daysOff', [])):
+                daily_capacity[day] += capacity_per_day
+
+    total_capacity = sum(daily_capacity[day] for day in dates)
+    remaining_capacity = []
+    capacity_left = total_capacity
+    for day in dates:
+        capacity_left -= daily_capacity[day]
+        remaining_capacity.append(round(max(capacity_left, 0.0), 2))
+    if remaining_capacity:
+        remaining_capacity[-1] = 0.0
+
+    return daily_capacity, remaining_capacity, capacity_members, total_capacity
+
+
+def build_historical_burndown_data(snapshot_rows, capacities, start_date, end_date, as_of_date=None):
+    """Build burndown series from daily historical WorkItemSnapshot rows."""
+    s_dt = _parse_br_date(start_date, "Start Date")
+    e_dt = _parse_br_date(end_date, "End Date")
+    if s_dt > e_dt:
+        raise ValueError("Start Date must be before or equal to End Date.")
+
+    dates = _work_days(s_dt, e_dt)
+    if not dates:
+        raise ValueError("The selected burndown period has no working days.")
+
+    rows_by_date = _rows_by_date(snapshot_rows)
+    completed_states = {'closed', 'completed', 'done', 'resolved'}
+    full_actual_remaining = []
+    items_not_estimated = 0
+
+    for day in dates:
+        rows = rows_by_date.get(day, [])
+        total_remaining = 0.0
+        for row in rows:
+            remaining = row.get('RemainingWork')
+            if remaining is None:
+                items_not_estimated += 1
+                continue
+            total_remaining += _coerce_float(remaining, 0.0)
+        full_actual_remaining.append(round(total_remaining, 2))
+
+    if as_of_date is None:
+        cutoff_date = min(datetime.now().date(), e_dt)
+    elif hasattr(as_of_date, 'date'):
+        cutoff_date = min(as_of_date.date(), e_dt)
+    elif isinstance(as_of_date, str):
+        cutoff_date = min(_parse_br_date(as_of_date, "As Of Date"), e_dt)
+    else:
+        cutoff_date = min(as_of_date, e_dt)
+
+    actual_remaining = [
+        value if day <= cutoff_date else None
+        for day, value in zip(dates, full_actual_remaining)
+    ]
+    elapsed_actual = [value for value in actual_remaining if value is not None]
+    actual_through_date = dates[len(elapsed_actual) - 1] if elapsed_actual else None
+
+    latest_rows = rows_by_date.get(actual_through_date, []) if actual_through_date else []
+    completed_items = sum(
+        1 for row in latest_rows
+        if _normalize_name(row.get('State')) in completed_states
+    )
+    completed_percent = (completed_items / len(latest_rows) * 100) if latest_rows else 0.0
+
+    daily_capacity, remaining_capacity, capacity_members, total_capacity = _build_capacity_series(capacities, dates)
+
+    start_remaining = full_actual_remaining[0] if full_actual_remaining else 0.0
+    remaining_work = elapsed_actual[-1] if elapsed_actual else 0.0
+    total_scope_increase = remaining_work - start_remaining
+    average_burndown = max(start_remaining - remaining_work, 0.0) / len(dates)
+
+    ideal_trend = [
+        round(max(start_remaining * (1 - ((idx + 1) / len(dates))), 0.0), 2)
+        for idx in range(len(dates))
+    ]
+
+    return {
+        'dates': dates,
+        'actual_remaining': actual_remaining,
+        'full_actual_remaining': full_actual_remaining,
+        'remaining_capacity': remaining_capacity,
+        'ideal_trend': ideal_trend,
+        'daily_capacity': [round(daily_capacity[day], 2) for day in dates],
+        'capacity_members': capacity_members,
+        'summary': {
+            'start_date': s_dt,
+            'end_date': e_dt,
+            'completed_percent': round(completed_percent, 2),
+            'average_burndown': round(average_burndown, 2),
+            'items_not_estimated': items_not_estimated,
+            'remaining_work': round(remaining_work, 2),
+            'total_scope_increase': round(total_scope_increase, 2),
+            'total_capacity': round(total_capacity, 2),
+            'actual_through_date': actual_through_date,
+        },
+    }
+
+
+def get_historical_burndown_data(base_url, headers, area_path, sprint, selected_members=None,
+                                 start_date=None, end_date=None, progress_callback=None):
+    """Fetch historical sprint snapshots and build a DevOps-style burndown payload."""
+    s_dt = _parse_br_date(start_date, "Start Date")
+    e_dt = _parse_br_date(end_date, "End Date")
+
+    if progress_callback:
+        progress_callback(0.08)
+    snapshot_rows = _get_historical_burndown_rows(
+        base_url, headers, area_path, sprint, selected_members,
+        s_dt, e_dt, progress_callback=progress_callback,
+    )
+
+    if progress_callback:
+        progress_callback(0.50)
+    capacities = get_team_capacities(
+        base_url, headers, area_path, sprint,
+        selected_members=selected_members,
+        start_date=start_date,
+        end_date=end_date,
+    )
+
+    if progress_callback:
+        progress_callback(0.90)
+    return build_historical_burndown_data(snapshot_rows, capacities, start_date, end_date)
+
+
 def build_burndown_data(task_updates, current_items, capacities, start_date, end_date, as_of_date=None):
     """Build burndown series from fetched task histories and capacity records."""
     s_dt = _parse_br_date(start_date, "Start Date")
@@ -588,20 +1049,21 @@ def build_burndown_data(task_updates, current_items, capacities, start_date, end
     completed_states = {'closed', 'completed', 'done', 'resolved'}
     completed_items = 0
 
+    tasks_visited = []
+
     for task_id, updates in task_updates.items():
         current = current_items.get(str(task_id), {})
         state = _normalize_name(current.get('state'))
         if state in completed_states:
             completed_items += 1
 
-        created_at = _parse_azure_datetime(current.get('created_date'))
-        created_date = created_at.date() if created_at else None
-
         remaining_changes = []
         for update in updates:
             fields = update.get('fields', {})
+
             if REMAINING_WORK_FIELD not in fields:
                 continue
+
             changed_date = (
                 fields.get('System.ChangedDate', {}).get('newValue') or
                 fields.get('System.AuthorizedDate', {}).get('newValue')
@@ -632,11 +1094,12 @@ def build_burndown_data(task_updates, current_items, capacities, start_date, end
 
         change_idx = 0
         for day in dates:
-            if created_date and day < created_date:
-                continue
             while change_idx < len(remaining_changes) and remaining_changes[change_idx]['date'] <= day:
                 running_remaining = remaining_changes[change_idx]['new']
                 change_idx += 1
+            if running_remaining > 0 and task_id not in tasks_visited:
+                tasks_visited.append(task_id)
+
             daily_actual[day] += running_remaining
 
     daily_capacity = defaultdict(float)
@@ -754,10 +1217,16 @@ def get_burndown_data(task_ids, base_url, headers, area_path, sprint, selected_m
     return build_burndown_data(task_updates, current_items, capacities, start_date, end_date)
 
 
-def get_work_history(task_ids, base_url, headers, start_date=None, end_date=None, progress_callback=None):
+def get_work_history(task_ids, base_url, headers, start_date=None, end_date=None,
+                     progress_callback=None, membership_by_date=None):
+    task_ids = [str(task_id) for task_id in task_ids]
     person_daily_data = defaultdict(lambda: defaultdict(lambda: {'completed': 0.0, 'remaining_dec': 0.0}))
     worker_text_logs = defaultdict(list)
     total = len(task_ids)
+
+    if total == 0:
+        print("No tasks found for work history.")
+        return {}
 
     try:
         s_dt = datetime.strptime(start_date, "%d/%m/%Y").date() if start_date else None
@@ -828,6 +1297,8 @@ def get_work_history(task_ids, base_url, headers, start_date=None, end_date=None
 
                     if s_dt and date_k < s_dt: continue
                     if e_dt and date_k > e_dt: continue
+                    if membership_by_date is not None and str(task_id) not in membership_by_date.get(date_k, set()):
+                        continue
 
                     change = {'datetime': local_dt, 'date': date_k, 'assignee': running_assignee}
                     if COMPLETED_WORK_FIELD in f:
@@ -902,3 +1373,35 @@ def get_work_history(task_ids, base_url, headers, start_date=None, end_date=None
         for d, m in days.items():
             if m['completed'] != 0 or m['remaining_dec'] != 0: cleaned[p][d] = m
     return cleaned
+
+
+def get_historical_work_history(base_url, headers, area_path, sprint, selected_members=None,
+                                start_date=None, end_date=None, progress_callback=None):
+    """Fetch work history for tasks that historically belonged to the sprint."""
+    s_dt = _parse_br_date(start_date, "Start Date")
+    e_dt = _parse_br_date(end_date, "End Date")
+
+    snapshot_rows = _get_historical_snapshot_rows(
+        base_url, headers, area_path, sprint, selected_members,
+        s_dt, e_dt, include_weekends=True, progress_callback=progress_callback,
+    )
+    membership = _membership_by_date(snapshot_rows)
+    task_ids = sorted({task_id for task_ids_for_day in membership.values() for task_id in task_ids_for_day})
+
+    print(f"Found {len(task_ids)} task(s) with historical sprint membership.")
+    if not task_ids:
+        return {}
+
+    def history_progress(value):
+        if progress_callback:
+            progress_callback(0.35 + (value * 0.60))
+
+    return get_work_history(
+        task_ids,
+        base_url,
+        headers,
+        start_date=start_date,
+        end_date=end_date,
+        progress_callback=history_progress,
+        membership_by_date=membership,
+    )
