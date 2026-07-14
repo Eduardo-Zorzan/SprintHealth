@@ -189,20 +189,53 @@ def _snapshot_assignee(row):
     return value or ""
 
 
-def _historical_filter(area_path, sprint_path, start_date, end_date):
+def _unique_selected_members(selected_members):
+    unique_members = []
+    seen = set()
+    for member in selected_members or []:
+        clean_member = str(member).strip()
+        if not clean_member:
+            continue
+        key = clean_member.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_members.append(clean_member)
+    return unique_members
+
+
+def _odata_assignee_filter(selected_members):
+    member_filters = []
+    for member in _unique_selected_members(selected_members):
+        quoted_member = _odata_quote(member)
+        member_filters.append(
+            f"(AssignedTo/UserName eq {quoted_member} or AssignedTo/UserEmail eq {quoted_member})"
+        )
+    if not member_filters:
+        return ""
+    return "(" + " or ".join(member_filters) + ")"
+
+
+def _historical_filter(area_path, sprint_path, start_date, end_date, selected_members=None):
     area = normalize_area_path(area_path)
     sprint = normalize_iteration_path(sprint_path)
     area_prefix = area + "\\"
-    return (
+    filters = [
         f"DateSK ge {_date_sk(start_date)} and DateSK le {_date_sk(end_date)} "
-        f"and WorkItemType eq 'Task' "
-        f"and (Area/AreaPath eq {_odata_quote(area)} or startswith(Area/AreaPath,{_odata_quote(area_prefix)})) "
-        f"and Iteration/IterationPath eq {_odata_quote(sprint)}"
-    )
+        f"and WorkItemType eq 'Task'",
+        f"(Area/AreaPath eq {_odata_quote(area)} or startswith(Area/AreaPath,{_odata_quote(area_prefix)}))",
+        f"Iteration/IterationPath eq {_odata_quote(sprint)}",
+    ]
+    assignee_filter = _odata_assignee_filter(selected_members)
+    if assignee_filter:
+        filters.append(assignee_filter)
+    return " and ".join(filters)
 
 
 def _query_historical_burndown_odata(base_url, headers, area_path, sprint,
-                                     start_date, end_date, progress_callback=None):
+                                     start_date, end_date, selected_members=None,
+                                     progress_callback=None):
+    filter_members = _unique_selected_members(selected_members)
     analytics_root = _analytics_root_url(base_url)
     session = requests.Session()
     session.verify = False
@@ -215,11 +248,14 @@ def _query_historical_burndown_odata(base_url, headers, area_path, sprint,
     sprint_path = _literal_iteration_path(base_url, headers, area_path, sprint, start_date, end_date)
     params = {
         '$apply': (
-            f"filter({_historical_filter(area_path, sprint_path, start_date, end_date)})/"
+            f"filter({_historical_filter(area_path, sprint_path, start_date, end_date, filter_members)})/"
             "groupby((DateSK),aggregate(RemainingWork with sum as RemainingWork))"
         )
     }
-    print(f"Querying Analytics WorkItemSnapshot aggregate: {analytics_root}/WorkItemSnapshot")
+    if filter_members:
+        print(f"Querying member-filtered Analytics WorkItemSnapshot aggregate: {analytics_root}/WorkItemSnapshot")
+    else:
+        print(f"Querying Analytics WorkItemSnapshot aggregate: {analytics_root}/WorkItemSnapshot")
     rows = _odata_get_all(session, f"{analytics_root}/WorkItemSnapshot", params=params)
     rows.sort(key=lambda row: row.get('DateSK') or 0)
 
@@ -378,22 +414,28 @@ def _get_historical_snapshot_rows(base_url, headers, area_path, sprint, selected
 
 def _get_historical_burndown_rows(base_url, headers, area_path, sprint, selected_members,
                                   start_date, end_date, progress_callback=None):
-    if not selected_members:
-        try:
-            rows = _query_historical_burndown_odata(
-                base_url, headers, area_path, sprint,
-                start_date, end_date, progress_callback=progress_callback,
-            )
-            if rows:
-                return rows
-            print("Analytics WorkItemSnapshot burndown aggregate returned no rows; trying WIQL ASOF fallback.")
-        except AnalyticsUnavailable as exc:
-            print(f"Analytics WorkItemSnapshot burndown aggregate unavailable: {exc}")
-    else:
-        print("Member-filtered burndown uses WIQL ASOF for assignee parity.")
+    filter_members = _unique_selected_members(selected_members)
+    try:
+        rows = _query_historical_burndown_odata(
+            base_url, headers, area_path, sprint,
+            start_date, end_date, selected_members=filter_members,
+            progress_callback=progress_callback,
+        )
+        if rows or filter_members:
+            return rows
+        print("Analytics WorkItemSnapshot burndown aggregate returned no rows; trying WIQL ASOF fallback.")
+    except AnalyticsUnavailable as exc:
+        print(f"Analytics WorkItemSnapshot burndown aggregate unavailable: {exc}")
+        if filter_members:
+            print("Member-filtered burndown is falling back to WIQL ASOF.")
+    except Exception as exc:
+        if not filter_members:
+            raise
+        print(f"Member-filtered Analytics WorkItemSnapshot burndown aggregate failed: {exc}")
+        print("Member-filtered burndown is falling back to WIQL ASOF.")
 
     return _query_historical_snapshots_wiql(
-        base_url, headers, area_path, sprint, selected_members,
+        base_url, headers, area_path, sprint, filter_members,
         start_date, end_date, include_weekends=False,
         progress_callback=progress_callback,
     )
