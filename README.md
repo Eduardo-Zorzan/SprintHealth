@@ -5,7 +5,7 @@ DevOps Sprint Health Pro is a Python-based desktop application designed to provi
 ## Features
 
 - **Sprint Health Graphics**: Generate detailed burndown and time-registration charts for the current or previous sprints.
-- **Historical Sprint Membership**: Burndown charts use Azure DevOps Analytics snapshots when available, including member-filtered views, with WIQL `ASOF` fallback. Time-registration charts also use historical sprint membership so moved-out sprint tasks are still counted on the dates they belonged to the sprint.
+- **Historical Sprint Membership**: Burndown charts and time-registration membership filters use Azure DevOps Analytics snapshots when available, including member-filtered views, with WIQL `ASOF` fallback. Moved-out sprint tasks are still counted on the dates they belonged to the sprint.
 - **Team Member Selection**: Filter metrics by specific team members. Syncs dynamically with DevOps.
 - **Reassignments Tracking**: Analyze task reassignments over time to see who reassigned tasks, to whom, and when.
 - **Built-in Image Viewer**: Explore generated graphs directly inside the app with panning and zooming support.

@@ -266,8 +266,10 @@ def _query_historical_burndown_odata(base_url, headers, area_path, sprint,
 
 
 def _query_historical_membership_odata(base_url, headers, area_path, sprint,
-                                      start_date, end_date, include_weekends=False,
+                                      start_date, end_date, selected_members=None,
+                                      include_weekends=False,
                                       progress_callback=None):
+    filter_members = _unique_selected_members(selected_members)
     analytics_root = _analytics_root_url(base_url)
     session = requests.Session()
     session.verify = False
@@ -280,11 +282,14 @@ def _query_historical_membership_odata(base_url, headers, area_path, sprint,
     sprint_path = _literal_iteration_path(base_url, headers, area_path, sprint, start_date, end_date)
     params = {
         '$apply': (
-            f"filter({_historical_filter(area_path, sprint_path, start_date, end_date)})/"
+            f"filter({_historical_filter(area_path, sprint_path, start_date, end_date, filter_members)})/"
             "groupby((DateSK,WorkItemId),aggregate($count as SnapshotCount))"
         )
     }
-    print(f"Querying Analytics WorkItemSnapshot membership aggregate: {analytics_root}/WorkItemSnapshot")
+    if filter_members:
+        print(f"Querying member-filtered Analytics WorkItemSnapshot membership aggregate: {analytics_root}/WorkItemSnapshot")
+    else:
+        print(f"Querying Analytics WorkItemSnapshot membership aggregate: {analytics_root}/WorkItemSnapshot")
     rows = _odata_get_all(session, f"{analytics_root}/WorkItemSnapshot", params=params)
     rows.sort(key=lambda row: ((row.get('DateSK') or 0), (row.get('WorkItemId') or 0)))
 
@@ -390,23 +395,29 @@ def _query_historical_snapshots_wiql(base_url, headers, area_path, sprint, selec
 def _get_historical_snapshot_rows(base_url, headers, area_path, sprint, selected_members,
                                   start_date, end_date, include_weekends=False,
                                   progress_callback=None):
-    if not selected_members:
-        try:
-            rows = _query_historical_membership_odata(
-                base_url, headers, area_path, sprint,
-                start_date, end_date, include_weekends=include_weekends,
-                progress_callback=progress_callback,
-            )
-            if rows:
-                return rows
-            print("Analytics WorkItemSnapshot membership aggregate returned no rows; trying WIQL ASOF fallback.")
-        except AnalyticsUnavailable as exc:
-            print(f"Analytics WorkItemSnapshot membership aggregate unavailable: {exc}")
-    else:
-        print("Member-filtered historical membership uses WIQL ASOF for assignee parity.")
+    filter_members = _unique_selected_members(selected_members)
+    try:
+        rows = _query_historical_membership_odata(
+            base_url, headers, area_path, sprint,
+            start_date, end_date, selected_members=filter_members,
+            include_weekends=include_weekends,
+            progress_callback=progress_callback,
+        )
+        if rows or filter_members:
+            return rows
+        print("Analytics WorkItemSnapshot membership aggregate returned no rows; trying WIQL ASOF fallback.")
+    except AnalyticsUnavailable as exc:
+        print(f"Analytics WorkItemSnapshot membership aggregate unavailable: {exc}")
+        if filter_members:
+            print("Member-filtered historical membership is falling back to WIQL ASOF.")
+    except Exception as exc:
+        if not filter_members:
+            raise
+        print(f"Member-filtered Analytics WorkItemSnapshot membership aggregate failed: {exc}")
+        print("Member-filtered historical membership is falling back to WIQL ASOF.")
 
     return _query_historical_snapshots_wiql(
-        base_url, headers, area_path, sprint, selected_members,
+        base_url, headers, area_path, sprint, filter_members,
         start_date, end_date, include_weekends=include_weekends,
         progress_callback=progress_callback,
     )

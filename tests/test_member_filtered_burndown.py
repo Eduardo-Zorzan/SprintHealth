@@ -138,5 +138,107 @@ class HistoricalBurndownSourceTests(unittest.TestCase):
         wiql_mock.assert_called_once()
 
 
+class HistoricalMembershipSourceTests(unittest.TestCase):
+    def setUp(self):
+        self.base_args = (
+            "https://dev.azure.com/org/project",
+            {"Authorization": "Basic token"},
+            "Project\\Area",
+            "Project\\Sprint 1",
+        )
+        self.start_date = date(2026, 7, 1)
+        self.end_date = date(2026, 7, 10)
+
+    @patch("devops_api._query_historical_snapshots_wiql")
+    @patch("devops_api._query_historical_membership_odata")
+    def test_selected_members_use_analytics_membership_when_available(self, odata_mock, wiql_mock):
+        rows = [{"DateSK": 20260701, "WorkItemId": 123, "SnapshotCount": 1}]
+        odata_mock.return_value = rows
+
+        result = devops_api._get_historical_snapshot_rows(
+            *self.base_args,
+            selected_members=["Alice"],
+            start_date=self.start_date,
+            end_date=self.end_date,
+            include_weekends=True,
+        )
+
+        self.assertEqual(rows, result)
+        self.assertEqual(["Alice"], odata_mock.call_args.kwargs["selected_members"])
+        self.assertTrue(odata_mock.call_args.kwargs["include_weekends"])
+        wiql_mock.assert_not_called()
+
+    @patch("devops_api._query_historical_snapshots_wiql")
+    @patch("devops_api._query_historical_membership_odata")
+    def test_selected_members_membership_falls_back_to_wiql_when_analytics_fails(self, odata_mock, wiql_mock):
+        fallback_rows = [{"DateSK": 20260701, "WorkItemId": 123}]
+        odata_mock.side_effect = devops_api.AnalyticsUnavailable("metadata missing")
+        wiql_mock.return_value = fallback_rows
+
+        result = devops_api._get_historical_snapshot_rows(
+            *self.base_args,
+            selected_members=["Alice"],
+            start_date=self.start_date,
+            end_date=self.end_date,
+            include_weekends=True,
+        )
+
+        self.assertEqual(fallback_rows, result)
+        wiql_mock.assert_called_once()
+        self.assertTrue(wiql_mock.call_args.kwargs["include_weekends"])
+
+    @patch("devops_api._query_historical_snapshots_wiql")
+    @patch("devops_api._query_historical_membership_odata")
+    def test_selected_members_membership_falls_back_to_wiql_on_generic_analytics_error(self, odata_mock, wiql_mock):
+        fallback_rows = [{"DateSK": 20260701, "WorkItemId": 123}]
+        odata_mock.side_effect = RuntimeError("unexpected analytics error")
+        wiql_mock.return_value = fallback_rows
+
+        result = devops_api._get_historical_snapshot_rows(
+            *self.base_args,
+            selected_members=["Alice"],
+            start_date=self.start_date,
+            end_date=self.end_date,
+            include_weekends=True,
+        )
+
+        self.assertEqual(fallback_rows, result)
+        wiql_mock.assert_called_once()
+
+    @patch("devops_api._query_historical_snapshots_wiql")
+    @patch("devops_api._query_historical_membership_odata")
+    def test_selected_members_empty_membership_analytics_result_does_not_fall_back(self, odata_mock, wiql_mock):
+        odata_mock.return_value = []
+
+        result = devops_api._get_historical_snapshot_rows(
+            *self.base_args,
+            selected_members=["Alice"],
+            start_date=self.start_date,
+            end_date=self.end_date,
+            include_weekends=True,
+        )
+
+        self.assertEqual([], result)
+        wiql_mock.assert_not_called()
+
+    @patch("devops_api._query_historical_snapshots_wiql")
+    @patch("devops_api._query_historical_membership_odata")
+    def test_unfiltered_empty_membership_analytics_result_still_falls_back(self, odata_mock, wiql_mock):
+        fallback_rows = [{"DateSK": 20260701, "WorkItemId": 123}]
+        odata_mock.return_value = []
+        wiql_mock.return_value = fallback_rows
+
+        result = devops_api._get_historical_snapshot_rows(
+            *self.base_args,
+            selected_members=None,
+            start_date=self.start_date,
+            end_date=self.end_date,
+            include_weekends=True,
+        )
+
+        self.assertEqual(fallback_rows, result)
+        wiql_mock.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()
