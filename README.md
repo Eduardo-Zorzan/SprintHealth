@@ -59,7 +59,7 @@ If `python` is not found on macOS, use `python3` or activate the virtual environ
 To use the application, you will need to provide:
 - **Server URL**: Your Azure DevOps organization/server URL.
 - **Area Path**: The specific area path for your team or project.
-- **Sprint**: The iteration path (defaults to `@CurrentIteration`).
+- **Sprint**: The iteration path.
 - **PAT Token**: A Personal Access Token (PAT) with read access to work items in Azure DevOps.
 
 For closest parity with Azure DevOps burndown analytics, the project should have Analytics/OData enabled. If Analytics is unavailable, the app falls back to historical WIQL queries.

@@ -38,9 +38,7 @@ def build_sprint_combo_values(sprint_options, selected=None):
             seen.add(key)
             values.append(text)
 
-    add("@CurrentIteration")
     for option in sprint_options:
         add(option)
     add(selected)
-    return values or ["@CurrentIteration"]
-
+    return values

@@ -52,7 +52,7 @@ class DevOpsApp(ctk.CTk):
         self.load_combos_btn.pack(pady=5, padx=20, fill="x")
 
         self.area_entry = self._create_combo_input("Area Path", config.get("area", r""))
-        self.sprint_entry = self._create_combo_input("Sprint", config.get("sprint", "@CurrentIteration"), initial_values=["@CurrentIteration"])
+        self.sprint_entry = self._create_combo_input("Sprint", config.get("sprint"))
         self.token_entry = self._create_input("PAT Token", config.get("token", ""), is_password=True)
 
         # Date Filter Area
