@@ -79,7 +79,7 @@ For closest parity with Azure DevOps burndown analytics, the project should have
 - `ui/`: Reusable UI helpers, image/burndown viewers, and reassignment table rendering.
 - `charts/`: Burndown and time-registration chart generation helpers.
 - `devops_api.py`: Handles all HTTP API interactions with Azure DevOps.
-- `config.py`: Manages saving and loading local configuration and member caches (e.g., `devops_config.json`, `members_cache.json`).
+- `config.py`: Manages saving and loading local configuration, member caches, and combo caches (e.g., `devops_config.json`, `members_cache.json`, `combos_cache.json`).
 - `plotting.py`: Compatibility facade for chart generation imports.
 - `reassignment.py`: Processes and analyzes task reassignment history.
 - `enums.py`: Contains enumerations like `Graphic_Type`.

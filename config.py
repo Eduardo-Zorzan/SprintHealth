@@ -5,6 +5,7 @@ COMPLETED_WORK_FIELD = 'Microsoft.VSTS.Scheduling.CompletedWork'
 REMAINING_WORK_FIELD = 'Microsoft.VSTS.Scheduling.RemainingWork'
 CONFIG_FILE = 'devops_config.json'
 MEMBERS_CACHE_FILE = 'members_cache.json'
+COMBOS_CACHE_FILE = 'combos_cache.json'
 ITERATIONS_CACHE_FILE = 'iterations_cache.json'
 
 
@@ -38,6 +39,30 @@ def load_members_cache():
 def save_members_cache(members):
     with open(MEMBERS_CACHE_FILE, 'w', encoding='utf-8') as f:
         json.dump(members, f, indent=4)
+
+
+def load_combos_cache():
+    if os.path.exists(COMBOS_CACHE_FILE):
+        try:
+            with open(COMBOS_CACHE_FILE, 'r', encoding='utf-8') as f:
+                cache = json.load(f)
+            if isinstance(cache, dict):
+                return {
+                    "areas": cache.get("areas", []) if isinstance(cache.get("areas"), list) else [],
+                    "sprints": cache.get("sprints", []) if isinstance(cache.get("sprints"), list) else [],
+                }
+        except:
+            pass
+    return {"areas": [], "sprints": []}
+
+
+def save_combos_cache(area_options, sprint_options):
+    combos = {
+        "areas": list(area_options or []),
+        "sprints": list(sprint_options or []),
+    }
+    with open(COMBOS_CACHE_FILE, 'w', encoding='utf-8') as f:
+        json.dump(combos, f, indent=4)
 
 
 def load_iterations_cache():

@@ -7,7 +7,14 @@ import customtkinter as ctk
 
 from charts.burndown import plot_burndown
 from charts.time_registration import generate_all_output
-from config import load_config, load_members_cache, save_config, save_members_cache
+from config import (
+    load_combos_cache,
+    load_config,
+    load_members_cache,
+    save_combos_cache,
+    save_config,
+    save_members_cache,
+)
 from devops_api import (
     build_auth_headers,
     get_area_options,
@@ -47,12 +54,13 @@ class DevOpsApp(ctk.CTk):
         ctk.CTkLabel(self.sidebar, text="CONFIGURATION", font=ctk.CTkFont(size=20, weight="bold")).pack(pady=20)
 
         config = load_config()
+        combos_cache = load_combos_cache()
         self.url_entry = self._create_input("Server URL", config.get("url", ""))
         self.load_combos_btn = ctk.CTkButton(self.sidebar, text="Load Combos", command=self.load_combos, fg_color="#444", hover_color="#555")
         self.load_combos_btn.pack(pady=5, padx=20, fill="x")
 
-        self.area_entry = self._create_combo_input("Area Path", config.get("area", r""))
-        self.sprint_entry = self._create_combo_input("Sprint", config.get("sprint"))
+        self.area_entry = self._create_combo_input("Area Path", config.get("area", r""), combos_cache.get("areas"))
+        self.sprint_entry = self._create_combo_input("Sprint", config.get("sprint"), combos_cache.get("sprints"))
         self.token_entry = self._create_input("PAT Token", config.get("token", ""), is_password=True)
 
         # Date Filter Area
@@ -235,9 +243,10 @@ class DevOpsApp(ctk.CTk):
                 else:
                     print("No area options returned.")
 
-                sprint_options = get_sprint_options(url, token, area_to_load)
+                sprint_options = get_sprint_options(url, token, area_to_load, force_refresh=True)
                 sprint_to_load = sprint or (sprint_options[0] if sprint_options else "@CurrentIteration")
                 self.after(0, lambda options=sprint_options, selected=sprint_to_load: self._set_sprint_combo_values(options, selected))
+                save_combos_cache(area_options, sprint_options)
 
                 if sprint_options:
                     print(f"Loaded {len(sprint_options)} sprint option(s).")

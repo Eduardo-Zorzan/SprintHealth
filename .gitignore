@@ -17,3 +17,4 @@ iterations_cache.json
 graphify-out
 logs
 .DS_Store
+combos_cache.json

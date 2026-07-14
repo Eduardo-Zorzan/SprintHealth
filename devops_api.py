@@ -499,17 +499,18 @@ def _fetch_task_updates(session, base_url, task_id):
     return updates
 
 
-def get_iterations(base_url, pat, area_path):
+def get_iterations(base_url, pat, area_path, force_refresh=False):
     """Fetch iterations tree from API with 1-hour cache."""
-    cache = load_iterations_cache()
-    if cache and 'timestamp' in cache and 'data' in cache:
-        try:
-            cached_time = datetime.fromisoformat(cache['timestamp'])
-            if (datetime.now() - cached_time).total_seconds() < 3600:
-                print("Using cached iterations (less than 1 hour old).")
-                return cache['data']
-        except:
-            pass
+    if not force_refresh:
+        cache = load_iterations_cache()
+        if cache and 'timestamp' in cache and 'data' in cache:
+            try:
+                cached_time = datetime.fromisoformat(cache['timestamp'])
+                if (datetime.now() - cached_time).total_seconds() < 3600:
+                    print("Using cached iterations (less than 1 hour old).")
+                    return cache['data']
+            except:
+                pass
 
     print("Fetching iterations from API...")
     b64_pat = base64.b64encode(f":{pat}".encode('utf-8')).decode('utf-8')
@@ -565,7 +566,7 @@ def get_area_options(base_url, pat):
     return []
 
 
-def get_sprint_options(base_url, pat, area_path):
+def get_sprint_options(base_url, pat, area_path, force_refresh=False):
     """Return date-bearing iteration paths for the sprint combo."""
     options = []
     seen = set()
@@ -602,7 +603,7 @@ def get_sprint_options(base_url, pat, area_path):
     except Exception as ex:
         print(f"Team sprint lookup failed: {ex}. Falling back to project iterations.")
 
-    iterations = get_iterations(base_url, pat, area_path)
+    iterations = get_iterations(base_url, pat, area_path, force_refresh=force_refresh)
     walk_many(iterations)
     return options
 
