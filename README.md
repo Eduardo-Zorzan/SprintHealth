@@ -9,7 +9,7 @@ DevOps Sprint Health Pro is a Python-based desktop application designed to provi
 - **Team Member Selection**: Filter metrics by specific team members. Syncs dynamically with DevOps.
 - **Reassignments Tracking**: Analyze task reassignments over time to see who reassigned tasks, to whom, and when.
 - **Built-in Image Viewer**: Explore generated graphs directly inside the app with panning and zooming support.
-- **Dark Mode UI**: A sleek, modern graphical interface powered by `customtkinter`.
+- **UI**: A sleek, modern graphical interface powered by `customtkinter`.
 - **System Logs**: View real-time operation logs within the UI.
 
 ## Requirements
@@ -24,6 +24,7 @@ DevOps Sprint Health Pro is a Python-based desktop application designed to provi
 
 ## Setup
 
+- If you just want to run the app, it can be downloaded from the github releases section 
 1. Clone or download this repository.
 2. Install the required dependencies:
    ```bash
@@ -58,15 +59,13 @@ If `python` is not found on macOS, use `python3` or activate the virtual environ
 
 To use the application, you will need to provide:
 - **Server URL**: Your Azure DevOps organization/server URL.
-- **Area Path**: The specific area path for your team or project.
-- **Sprint**: The iteration path.
 - **PAT Token**: A Personal Access Token (PAT) with read access to work items in Azure DevOps.
 
 For closest parity with Azure DevOps burndown analytics, the project should have Analytics/OData enabled. If Analytics is unavailable, the app falls back to historical WIQL queries.
 
 ### Demo Mode
 
-For recording demos without connecting to company Azure DevOps, enter this Server URL:
+For testing, can be used the built-in demo demo data without connecting to company Azure DevOps, for this purpose enter this Server URL:
 
 ```text
 mock://sprint-health
