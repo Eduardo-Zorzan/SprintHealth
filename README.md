@@ -92,3 +92,6 @@ In demo mode the app uses deterministic local data for area/sprint combos, sprin
 - `plotting.py`: Compatibility facade for chart generation imports.
 - `reassignment.py`: Processes and analyzes task reassignment history.
 - `enums.py`: Contains enumerations like `Graphic_Type`.
+
+
+## This app was made mainly with Codex (gpt 5.5) and Antigravity (gemini 3.1 Pro)
