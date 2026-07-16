@@ -15,6 +15,18 @@ from config import (
     load_iterations_cache,
     save_iterations_cache,
 )
+from demo_data import (
+    get_demo_area_options,
+    get_demo_capacities,
+    get_demo_date_range,
+    get_demo_members,
+    get_demo_snapshot_rows,
+    get_demo_sprint_dates,
+    get_demo_sprint_options,
+    get_demo_task_ids,
+    get_demo_work_history,
+    is_demo_url,
+)
 
 # Disable SSL Warnings
 urllib3.disable_warnings()
@@ -554,6 +566,10 @@ def _classification_node_paths(node, structure_type):
 
 def get_area_options(base_url, pat):
     """Return area paths for the area combo."""
+    if is_demo_url(base_url):
+        print("Using demo area paths.")
+        return get_demo_area_options()
+
     print("Fetching area paths from API...")
     b64_pat = base64.b64encode(f":{pat}".encode('utf-8')).decode('utf-8')
     headers = {'Authorization': f'Basic {b64_pat}'}
@@ -568,6 +584,10 @@ def get_area_options(base_url, pat):
 
 def get_sprint_options(base_url, pat, area_path, force_refresh=False):
     """Return date-bearing iteration paths for the sprint combo."""
+    if is_demo_url(base_url):
+        print("Using demo sprint options.")
+        return get_demo_sprint_options()
+
     options = []
     seen = set()
 
@@ -609,6 +629,11 @@ def get_sprint_options(base_url, pat, area_path, force_refresh=False):
 
 
 def get_sprint_dates(base_url, pat, area_path, sprint_name):
+    if is_demo_url(base_url):
+        s_br, e_br = get_demo_sprint_dates(sprint_name)
+        print(f"Using demo sprint dates: {s_br} to {e_br}")
+        return s_br, e_br
+
     print(f"Fetching dates for sprint: {sprint_name}...")
     b64_pat = base64.b64encode(f":{pat}".encode('utf-8')).decode('utf-8')
     headers = {'Authorization': f'Basic {b64_pat}'}
@@ -702,6 +727,14 @@ def get_sprint_dates(base_url, pat, area_path, sprint_name):
 
 
 def get_tasks(base_url, pat, area_path, sprint, filter_members=None, progress_callback=None):
+    if is_demo_url(base_url):
+        if progress_callback:
+            progress_callback(0.1)
+        task_ids = get_demo_task_ids(filter_members)
+        headers = build_auth_headers(pat or "demo")
+        print(f"Using demo tasks for {sprint}: {task_ids}")
+        return task_ids, headers
+
     if progress_callback: progress_callback(0.05)
     print(f"Querying Tasks for {sprint}...")
     wiql_url = f"{base_url}/_apis/wit/wiql?api-version=6.0"
@@ -768,6 +801,11 @@ def get_tasks(base_url, pat, area_path, sprint, filter_members=None, progress_ca
 
 
 def get_members_from_tasks(base_url, headers, area_path, sprint):
+    if is_demo_url(base_url):
+        members = get_demo_members()
+        print(f"Using demo team members: {members}")
+        return members
+
     wiql_area_path = normalize_area_path(area_path)
     wiql_sprint = normalize_iteration_path(sprint)
     iteration_condition = _wiql_quote(wiql_sprint) if not wiql_sprint.startswith('@') else wiql_sprint
@@ -907,6 +945,12 @@ def resolve_team_iteration(base_url, headers, area_path, sprint, start_date=None
 
 
 def get_team_capacities(base_url, headers, area_path, sprint, selected_members=None, start_date=None, end_date=None):
+    if is_demo_url(base_url):
+        capacities = get_demo_capacities(selected_members, start_date, end_date)
+        member_names = [_identity_name(capacity.get('teamMember', {})) for capacity in capacities]
+        print(f"Using demo capacity for {len(capacities)} member(s): {member_names}")
+        return capacities
+
     iteration = resolve_team_iteration(base_url, headers, area_path, sprint, start_date, end_date)
     response = requests.get(
         f"{iteration['team_base_url']}/_apis/work/teamsettings/iterations/{iteration['id']}/capacities",
@@ -1063,6 +1107,19 @@ def build_historical_burndown_data(snapshot_rows, capacities, start_date, end_da
 def get_historical_burndown_data(base_url, headers, area_path, sprint, selected_members=None,
                                  start_date=None, end_date=None, progress_callback=None):
     """Fetch historical sprint snapshots and build a DevOps-style burndown payload."""
+    if is_demo_url(base_url):
+        start_date, end_date = get_demo_date_range(start_date, end_date)
+        if progress_callback:
+            progress_callback(0.08)
+        snapshot_rows = get_demo_snapshot_rows(start_date, end_date, selected_members)
+        if progress_callback:
+            progress_callback(0.50)
+        capacities = get_demo_capacities(selected_members, start_date, end_date)
+        if progress_callback:
+            progress_callback(0.90)
+        print(f"Using demo burndown data: {len(snapshot_rows)} snapshot row(s).")
+        return build_historical_burndown_data(snapshot_rows, capacities, start_date, end_date)
+
     s_dt = _parse_br_date(start_date, "Start Date")
     e_dt = _parse_br_date(end_date, "End Date")
 
@@ -1228,6 +1285,15 @@ def build_burndown_data(task_updates, current_items, capacities, start_date, end
 def get_burndown_data(task_ids, base_url, headers, area_path, sprint, selected_members=None,
                       start_date=None, end_date=None, progress_callback=None):
     """Fetch Azure DevOps data and build a burndown payload for plotting."""
+    if is_demo_url(base_url):
+        return get_historical_burndown_data(
+            base_url, headers, area_path, sprint,
+            selected_members=selected_members,
+            start_date=start_date,
+            end_date=end_date,
+            progress_callback=progress_callback,
+        )
+
     _parse_br_date(start_date, "Start Date")
     _parse_br_date(end_date, "End Date")
 
@@ -1432,6 +1498,15 @@ def get_work_history(task_ids, base_url, headers, start_date=None, end_date=None
 def get_historical_work_history(base_url, headers, area_path, sprint, selected_members=None,
                                 start_date=None, end_date=None, progress_callback=None):
     """Fetch work history for tasks that historically belonged to the sprint."""
+    if is_demo_url(base_url):
+        start_date, end_date = get_demo_date_range(start_date, end_date)
+        return get_demo_work_history(
+            selected_members=selected_members,
+            start_date=start_date,
+            end_date=end_date,
+            progress_callback=progress_callback,
+        )
+
     s_dt = _parse_br_date(start_date, "Start Date")
     e_dt = _parse_br_date(end_date, "End Date")
 

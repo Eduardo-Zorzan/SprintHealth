@@ -64,6 +64,16 @@ To use the application, you will need to provide:
 
 For closest parity with Azure DevOps burndown analytics, the project should have Analytics/OData enabled. If Analytics is unavailable, the app falls back to historical WIQL queries.
 
+### Demo Mode
+
+For recording demos without connecting to company Azure DevOps, enter this Server URL:
+
+```text
+mock://sprint-health
+```
+
+In demo mode the app uses deterministic local data for area/sprint combos, sprint dates, team members, burndown calculations, time-registration charts, and reassignment history. A PAT token is not required.
+
 ## Usage
 
 1. Launch the app and enter your configuration details on the left sidebar.

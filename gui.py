@@ -15,6 +15,7 @@ from config import (
     save_config,
     save_members_cache,
 )
+from demo_data import is_demo_url
 from devops_api import (
     build_auth_headers,
     get_area_options,
@@ -229,7 +230,7 @@ class DevOpsApp(ctk.CTk):
         area = normalize_area_path(area)
         sprint = normalize_iteration_path(sprint)
         if not url: return messagebox.showwarning("Error", "Enter Server URL")
-        if not token: return messagebox.showwarning("Error", "Enter PAT")
+        if not token and not is_demo_url(url): return messagebox.showwarning("Error", "Enter PAT")
         self.load_combos_btn.configure(state="disabled", text="Loading Combos...")
 
         def do_load():
@@ -274,7 +275,7 @@ class DevOpsApp(ctk.CTk):
         area = normalize_area_path(area)
         sprint = normalize_iteration_path(sprint)
         if not url: return messagebox.showwarning("Error", "Enter Server URL")
-        if not token: return messagebox.showwarning("Error", "Enter PAT")
+        if not token and not is_demo_url(url): return messagebox.showwarning("Error", "Enter PAT")
         self.load_dates_btn.configure(state="disabled", text="Loading Sprint Dates...")
 
         def do_load():
@@ -299,7 +300,8 @@ class DevOpsApp(ctk.CTk):
         url, area, sprint, token = self.url_entry.get(), self.area_entry.get(), self.sprint_entry.get(), self.token_entry.get()
         area = normalize_area_path(area)
         sprint = normalize_iteration_path(sprint)
-        if not token: return messagebox.showwarning("Error", "Enter PAT")
+        if not url: return messagebox.showwarning("Error", "Enter Server URL")
+        if not token and not is_demo_url(url): return messagebox.showwarning("Error", "Enter PAT")
         self.sync_btn.configure(state="disabled", text="Syncing...")
 
         def do_sync():
@@ -324,7 +326,8 @@ class DevOpsApp(ctk.CTk):
         start_date, end_date = self.start_date_entry.get(), self.end_date_entry.get()
         graphic_type = self.graphic_type.get()
 
-        if not token: return messagebox.showwarning("Error", "Missing PAT Token")
+        if not url: return messagebox.showwarning("Error", "Enter Server URL")
+        if not token and not is_demo_url(url): return messagebox.showwarning("Error", "Missing PAT Token")
 
         save_config(url, area, sprint, token, start_date, end_date)
         self.gen_btn.configure(state="disabled", text="PROCESSING...")
@@ -412,7 +415,8 @@ class DevOpsApp(ctk.CTk):
         sprint = normalize_iteration_path(sprint)
         start_date, end_date = self.start_date_entry.get(), self.end_date_entry.get()
 
-        if not token: return messagebox.showwarning("Error", "Missing PAT Token")
+        if not url: return messagebox.showwarning("Error", "Enter Server URL")
+        if not token and not is_demo_url(url): return messagebox.showwarning("Error", "Missing PAT Token")
 
         save_config(url, area, sprint, token, start_date, end_date)
         self.load_reassign_btn.configure(state="disabled", text="LOADING...")

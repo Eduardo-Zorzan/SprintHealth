@@ -6,11 +6,16 @@ import concurrent.futures
 import requests
 import urllib3
 
+from demo_data import get_demo_reassignments, is_demo_url
+
 urllib3.disable_warnings()
 
 
 def get_reassignments(task_ids, base_url, headers, start_date=None, end_date=None, progress_callback=None):
     """Extract all AssignedTo reassignments from task update history."""
+    if is_demo_url(base_url):
+        return get_demo_reassignments(task_ids, start_date, end_date, progress_callback)
+
     reassignments = []
     total = len(task_ids)
 
