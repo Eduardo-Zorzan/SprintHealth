@@ -13,6 +13,7 @@ devops_config.json
 members_cache.json
 iterations_cache.json
 .venv
+.pyinstaller-cache/
 .zed
 graphify-out
 logs
